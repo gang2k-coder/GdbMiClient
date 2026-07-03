@@ -168,27 +168,131 @@ public record CaptureResult(
 
 ## Auto-Capture 流程
 
-```
-GDB ─→ *stopped,reason="breakpoint-hit",bkptno="1" ─→ ReadLoop ─→ OnStopped
+```mermaid
+sequenceDiagram
+    participant Agent as 🤖 Agent
+    participant Tool as 🔧 MCP Tool<br/>(线程池线程)
+    participant Channel as 📮 Channel
+    participant Consumer as ⚙️ GdbSession<br/>(消费者线程, 单线程)
+    participant BPMan as 📋 BreakpointManager
+    participant CapMan as 📦 CapturesManager
+    participant Client as 🐞 GdbMiClient
+    participant GDB as 🐛 GDB 进程
 
-Consumer 线程:
-  ① bpManager.FindByNumber("1") ─→ { Capture: true, Action: "go" }
-  ② if Capture:
-       调用 GdbMiClient 收集:
-         get_registers → registers
-         get_program_counter → pc
-         get_call_stack → stack
-         get_local_variables → locals
-       构造 CaptureResult → capturesManager.Add(capture)
-  ③ if Action == "go":
-        _client.ExecuteAsync("-exec-continue")
-        // Agent 不知道刚才发生了什么
-     else if Action == "break":
-        _stopTcs.SetResult(stopEvent)
-        // Agent 收到 stop 通知
-  ④ if Action == "break":
-       // Agent 下次调用 get_captures() 拿到快照
+    rect rgb(255, 248, 240)
+        Note over Agent,GDB: ═══════════ 设置阶段 ═══════════
+
+        Agent->>Tool: set_breakpoint(location="loop_body", capture=true, action="go")
+        Tool->>Channel: WriteAsync(SetBreakpointOp)
+        Consumer->>Channel: ReadAsync → SetBreakpointOp
+        Consumer->>Client: ExecuteAsync(-break-insert -f loop_body)
+        Client->>GDB: 1001-break-insert -f loop_body
+        GDB-->>Client: 1001^done,bkpt={number="1"}
+        Consumer->>BPMan: Register("1", {capture:true, action:"go"})
+        Tool-->>Agent: bp #1 set
+
+        Agent->>Tool: set_breakpoint(location="after_loop", capture=true, action="break")
+        Tool->>Channel: WriteAsync(SetBreakpointOp)
+        Consumer->>Channel: ReadAsync → SetBreakpointOp
+        Consumer->>Client: ExecuteAsync(-break-insert -f after_loop)
+        Client->>GDB: 1002-break-insert -f after_loop
+        GDB-->>Client: 1002^done,bkpt={number="2"}
+        Consumer->>BPMan: Register("2", {capture:true, action:"break"})
+        Tool-->>Agent: bp #2 set
+    end
+
+    rect rgb(240, 255, 240)
+        Note over Agent,GDB: ═══════════ go-action 断点命中（Agent 无感知） ═══════════
+
+        Agent->>Tool: go(timeoutMs=30000)
+        Tool->>Channel: WriteAsync(GoOp)
+        Consumer->>Channel: ReadAsync → GoOp
+        Consumer->>Client: ExecuteAsync(-exec-continue)
+        Client->>GDB: 1003-exec-continue
+        GDB-->>Client: 1003^running
+
+        Note over Agent: await go...
+
+        GDB-->>Client: *stopped,reason=#quot;breakpoint-hit#quot;,bkptno=#quot;1#quot;
+
+        Consumer->>BPMan: FindByNumber("1") → {capture:true, action:"go"}
+        Note over Consumer: capture=true → 开始抓取状态
+
+        Consumer->>Client: ExecuteAsync(-data-list-register-values x)
+        Client->>GDB: 1004-data-list-register-values x
+        GDB-->>Client: 1004^done,register-values=[...]
+        Note over Consumer: registers = {rip:"0x401050", rax:"0x2a", ...}
+
+        Consumer->>Client: ExecuteAsync(-stack-info-frame)
+        Client->>GDB: 1005-stack-info-frame
+        GDB-->>Client: 1005^done,frame={addr="0x401050",func="loop_body"}
+        Note over Consumer: pc = {addr:"0x401050", func:"loop_body"}
+
+        Consumer->>Client: ExecuteAsync(-stack-list-frames 0 20)
+        Client->>GDB: 1006-stack-list-frames 0 20
+        GDB-->>Client: 1006^done,stack=[...]
+        Note over Consumer: callStack = [...]
+
+        Consumer->>Client: ExecuteAsync(-stack-list-locals --thread 1 --frame 0 2)
+        Client->>GDB: 1007-stack-list-locals --thread 1 --frame 0 2
+        GDB-->>Client: 1007^done,locals=[...]
+        Note over Consumer: locals = [...]
+
+        Consumer->>CapMan: Add(CaptureResult{...})
+        Note over CapMan: 快照累积
+
+        Note over Consumer: action="go" → 自动继续
+        Consumer->>Client: ExecuteAsync(-exec-continue)
+        Client->>GDB: 1008-exec-continue
+        GDB-->>Client: 1008^running
+        Note over Agent: Agent 仍在 await go...<br/>对此完全无感知
+    end
+
+    rect rgb(255, 240, 240)
+        Note over Agent,GDB: ═══════════ break-action 断点命中 ═══════════
+
+        GDB-->>Client: *stopped,reason=#quot;breakpoint-hit#quot;,bkptno=#quot;2#quot;
+
+        Consumer->>BPMan: FindByNumber("2") → {capture:true, action:"break"}
+        Note over Consumer: capture=true → 抓取状态
+
+        Consumer->>Client: ExecuteAsync(-data-list-register-values x)
+        Client->>GDB: 1009-data-list-register-values x
+        GDB-->>Client: 1009^done
+        Note over Consumer: registers captured
+
+        Consumer->>Client: ExecuteAsync(-stack-info-frame)
+        Client->>GDB: 1010-stack-info-frame
+        GDB-->>Client: 1010^done
+        Note over Consumer: pc captured
+
+        Consumer->>CapMan: Add(CaptureResult{...})
+
+        Note over Consumer: action="break" → 通知 Agent
+        Consumer-->>Tool: _stopTcs.SetResult(stopEvent)
+        Tool-->>Agent: stopped: breakpoint-hit at after_loop
+    end
+
+    rect rgb(248, 240, 255)
+        Note over Agent,GDB: ═══════════ Agent 事后获取快照 ═══════════
+
+        Agent->>Tool: get_captures()
+        Tool->>Channel: WriteAsync(GetCapturesOp)
+        Consumer->>Channel: ReadAsync → GetCapturesOp
+        Consumer->>CapMan: GetAll()
+        Note over CapMan: 返回 2 个快照:<br/>1. loop_body (go-action, 5次命中)<br/>2. after_loop (break-action)
+        Tool-->>Agent: [CaptureResult{...}, CaptureResult{...}]
+    end
 ```
+
+**要点：**
+
+| # | 关键行为 | 说明 |
+|---|---------|------|
+| ① | go-action 命中 → Agent 无感知 | 消费者线程查配置 → capture → 自动 `-exec-continue`，Agent 的 `go()` await 一直不返回 |
+| ② | capture 是同步阻塞操作 | 停在断点时，依次调 MI 命令收集 registers / pc / stack / locals，都是在 Consumer 线程串行完成 |
+| ③ | break-action 命中 → 通知 Agent | capture 完成后设 `_stopTcs`，Agent 的 `go()` await 返回，得到 `"breakpoint_hit"` |
+| ④ | 多个 go-action 命中累积在同一列表 | CapturesManager 不分 go/break，统一累积，Agent 事后 `get_captures()` 一次性拿到 |
 
 ## Tool 列表（32 个，对标 WinDbg 后端）
 
