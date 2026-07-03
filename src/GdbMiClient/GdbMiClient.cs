@@ -18,16 +18,19 @@ public class GdbMiClient : IDisposable
     private uint _nextToken = 1000;
     private readonly Dictionary<uint, PendingCommand> _pending = new();
     private readonly Channel<string> _outputChannel = Channel.CreateUnbounded<string>();
+    private readonly GdbCommandFactory _cmd;
     private readonly Channel<StopEvent> _stopChannel = Channel.CreateUnbounded<StopEvent>();
 
     public DebuggerState State { get; internal set; } = DebuggerState.NotConnected;
     public bool IsConnected => State != DebuggerState.NotConnected;
+    public GdbCommandFactory Cmd => _cmd;
 
     public GdbMiClient(ITransport transport, ILogger<GdbMiClient>? logger = null)
     {
         _transport = transport;
         _logger = logger;
         _parser = new MIResultParser(logger);
+        _cmd = new GdbCommandFactory(this);
     }
 
     // ═══════════ Lifecycle ═══════════

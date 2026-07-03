@@ -45,8 +45,11 @@ public class GdbCommandFactory
         return await _client.ExecuteAsync(new MICommand(cmd.ToString(), ""));
     }
 
-    public async Task<Results> BreakInsert(string functionName)
+    public async Task<Results> BreakInsertFunction(string functionName)
         => await _client.ExecuteAsync(new MICommand("-break-insert", $"-f {functionName}"));
+
+    public async Task<Results> BreakInsertRaw(string rawArgs)
+        => await _client.ExecuteAsync(new MICommand("-break-insert", rawArgs));
 
     public async Task<Results> BreakDelete(string bkptno)
         => await _client.ExecuteAsync(new MICommand("-break-delete", bkptno));
@@ -172,6 +175,9 @@ public class GdbCommandFactory
 
     public async Task Terminate()
         => await _client.ExecuteAsync(new MICommand("kill", ""));
+
+    public async Task TargetDetach()
+        => await _client.ExecuteAsync(new MICommand("-target-detach", ""));
 
     public async Task<TargetArchitecture> GetTargetArchitecture()
     {
