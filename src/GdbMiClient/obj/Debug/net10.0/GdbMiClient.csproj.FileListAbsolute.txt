@@ -1,0 +1,12 @@
+C:\Code\GdbMiClient\src\GdbMiClient\bin\Debug\net10.0\GdbMiClient.deps.json
+C:\Code\GdbMiClient\src\GdbMiClient\bin\Debug\net10.0\GdbMiClient.dll
+C:\Code\GdbMiClient\src\GdbMiClient\bin\Debug\net10.0\GdbMiClient.pdb
+C:\Code\GdbMiClient\src\GdbMiClient\obj\Debug\net10.0\GdbMiClient.csproj.AssemblyReference.cache
+C:\Code\GdbMiClient\src\GdbMiClient\obj\Debug\net10.0\GdbMiClient.GeneratedMSBuildEditorConfig.editorconfig
+C:\Code\GdbMiClient\src\GdbMiClient\obj\Debug\net10.0\GdbMiClient.AssemblyInfoInputs.cache
+C:\Code\GdbMiClient\src\GdbMiClient\obj\Debug\net10.0\GdbMiClient.AssemblyInfo.cs
+C:\Code\GdbMiClient\src\GdbMiClient\obj\Debug\net10.0\GdbMiClient.csproj.CoreCompileInputs.cache
+C:\Code\GdbMiClient\src\GdbMiClient\obj\Debug\net10.0\GdbMiClient.dll
+C:\Code\GdbMiClient\src\GdbMiClient\obj\Debug\net10.0\refint\GdbMiClient.dll
+C:\Code\GdbMiClient\src\GdbMiClient\obj\Debug\net10.0\GdbMiClient.pdb
+C:\Code\GdbMiClient\src\GdbMiClient\obj\Debug\net10.0\ref\GdbMiClient.dll
