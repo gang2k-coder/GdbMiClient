@@ -1,8 +1,10 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/GdbMiBridge.Mcp/GdbMiBridge.Mcp.csproj" />
     <Project Path="src/GdbMiClient/GdbMiClient.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/GdbMiBridge.Mcp.Tests/GdbMiBridge.Mcp.Tests.csproj" />
     <Project Path="tests/GdbMiClient.Tests/GdbMiClient.Tests.csproj" />
   </Folder>
 </Solution>
