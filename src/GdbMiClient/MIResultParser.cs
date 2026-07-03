@@ -2,7 +2,7 @@ using System.Globalization;
 using System.Text;
 using Microsoft.Extensions.Logging;
 
-namespace GdbMiClient;
+namespace GdbMi;
 
 /// <summary>
 /// Parses GDB MI output into typed result objects.

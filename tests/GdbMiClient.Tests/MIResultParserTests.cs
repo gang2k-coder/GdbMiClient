@@ -1,6 +1,7 @@
 using Xunit;
+using GdbMi;
 
-namespace GdbMiClient.Tests;
+namespace GdbMi.Tests;
 
 public class MIResultParserTests
 {

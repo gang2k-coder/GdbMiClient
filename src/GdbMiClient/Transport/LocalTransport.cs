@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 
-namespace GdbMiClient;
+namespace GdbMi;
 
 public class LocalTransport : ITransport, IDisposable
 {

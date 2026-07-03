@@ -1,4 +1,4 @@
-namespace GdbMiClient;
+namespace GdbMi;
 
 public record BreakpointInfo(
     string Number,
