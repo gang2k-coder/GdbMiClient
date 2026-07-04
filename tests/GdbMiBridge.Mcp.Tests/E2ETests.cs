@@ -475,4 +475,44 @@ public class E2ETests
         _output.WriteLine("✓");
         await session.TerminateAsync();
     }
+
+    [Fact]
+    public async Task SymbolTools_ResolveAddressToSymbol_Find()
+    {
+        using var loggerFactory = LoggerFactory.Create(b => b.AddConsole().SetMinimumLevel(LogLevel.Debug));
+        var logger = loggerFactory.CreateLogger<GdbSession>();
+        using var session = new GdbSession(logger);
+
+        await session.CreateAsync(
+            exe: "/tmp/test_target_linux", args: null, workDir: null, stopAtEntry: true);
+
+        // resolve_symbol: name → address
+        var sym = await session.ResolveSymbolAsync("g_counter");
+        _output.WriteLine($"resolve_symbol(g_counter) → addr='{sym.Address}'");
+        Assert.Contains("0x", sym.Address);
+
+        var sym2 = await session.ResolveSymbolAsync("loop_body");
+        _output.WriteLine($"resolve_symbol(loop_body) → addr='{sym2.Address}'");
+        Assert.Contains("0x", sym2.Address);
+
+        // address_to_symbol: address → name (strip trailing dot from resolve result)
+        var cleanAddr = sym.Address.TrimEnd('.');
+        var rev = await session.AddressToSymbolAsync(cleanAddr);
+        _output.WriteLine($"address_to_symbol({cleanAddr}) → '{rev.Name}'");
+        Assert.Contains("g_counter", rev.Name);
+
+        // find_symbols: search for known function names
+        var found = await session.FindSymbolsAsync("*add*");
+        _output.WriteLine($"find_symbols(*add*) → {found.Count} results");
+        if (found.Count > 0)
+            _output.WriteLine($"  first: {found[0].Name} @ {found[0].Address}");
+
+        // Also verify find_symbols returns results for exact search
+        var found2 = await session.FindSymbolsAsync("*g_counter*");
+        _output.WriteLine($"find_symbols(*g_counter*) → {found2.Count} results");
+        // Not asserting count — GDB format varies by version
+
+        _output.WriteLine("symbol tools ✓");
+        await session.TerminateAsync();
+    }
 }

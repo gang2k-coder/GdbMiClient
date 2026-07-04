@@ -26,6 +26,7 @@ public class GdbSession : IDisposable
     private TaskCompletionSource<SessionInfo>? _waitingForFirstStop; // Create completion
     private CancellationTokenSource? _goTimeoutCts;
     private Task? _readLoopTask;
+    private CancellationTokenSource? _readLoopCts;
     private int _currentThread = 1;
 
     public GdbMi.DebuggerState State => _client?.State ?? GdbMi.DebuggerState.NotConnected;
@@ -169,8 +170,8 @@ public class GdbSession : IDisposable
         await _client.ConnectAsync(CancellationToken.None);
 
         // Start background ReadLoop BEFORE any commands (so responses are read)
-        var readCts = new CancellationTokenSource();
-        _readLoopTask = ReadLoopAsync(readCts.Token);
+        _readLoopCts = new CancellationTokenSource();
+        _readLoopTask = ReadLoopAsync(_readLoopCts.Token);
 
         await _cmd.EnableTargetAsyncOption();
         await _cmd.FileExecAndSymbols(c.Executable);
@@ -340,9 +341,46 @@ public class GdbSession : IDisposable
 
     private async Task HandleGetProgramCounter(SessionOperation.GetProgramCounter gpc) { try { var f = (await _cmd!.StackInfoFrame()).Find<GdbMi.TupleValue>("frame"); gpc.Completion.TrySetResult(new(f.TryFindString("addr") ?? "", f.TryFindString("func") ?? "", "")); } catch { gpc.Completion.TrySetResult(new("?", "?", "")); } }
 
-    private async Task HandleResolveSymbol(SessionOperation.ResolveSymbol rs) { var r = await _client!.ConsoleCmdAsync($"info address {rs.Name}", allowWhileRunning: false); rs.Completion.TrySetResult(new(rs.Name, ExtractAddress(r) ?? "unknown")); }
-    private async Task HandleAddressToSymbol(SessionOperation.AddressToSymbol a2s) { var r = await _client!.ConsoleCmdAsync($"info symbol {a2s.Address}", allowWhileRunning: false); a2s.Completion.TrySetResult(new(r.Trim(), a2s.Address)); }
-    private async Task HandleFindSymbols(SessionOperation.FindSymbols fs) { fs.Completion.TrySetResult(ParseSymbolLines(await _client!.ConsoleCmdAsync($"info functions {fs.Pattern}", allowWhileRunning: false))); }
+    /// <summary>Run a CLI command and capture console output (~ lines). Uses SendAndReadInline pattern.</summary>
+    /// <summary>Run a CLI command and capture console output. Pauses background ReadLoop to avoid read conflicts.</summary>
+    private async Task<string> CliCommandAsync(string cmd)
+    {
+        // Pause the background ReadLoop so we can safely read responses ourselves
+        _readLoopCts?.Cancel();
+        if (_readLoopTask is not null) { try { await _readLoopTask; } catch { } }
+
+        try
+        {
+            uint token = Interlocked.Increment(ref _nextToken);
+            var escaped = cmd.Replace("\"", "\\\"");
+            await _transport!.SendAsync($"{token}-interpreter-exec console \"{escaped}\"\n", CancellationToken.None);
+
+            var output = new System.Text.StringBuilder();
+            while (!_transport.IsClosed)
+            {
+                var line = await _transport.ReadLineAsync(CancellationToken.None);
+                if (line is null) break;
+                if (line.StartsWith($"{token}^")) break;
+                if (line.StartsWith('~'))
+                {
+                    var decoded = new GdbMi.MIResultParser().ParseCString(line[1..].Trim());
+                    output.Append(decoded);
+                }
+                else { _client?.ProcessLine(line); }
+            }
+            return output.ToString().Trim();
+        }
+        finally
+        {
+            // Restart ReadLoop
+            _readLoopCts = new CancellationTokenSource();
+            _readLoopTask = ReadLoopAsync(_readLoopCts.Token);
+        }
+    }
+
+    private async Task HandleResolveSymbol(SessionOperation.ResolveSymbol rs) { _ = rs; try { var r = await CliCommandAsync($"info address {rs.Name}"); rs.Completion.TrySetResult(new(rs.Name, ExtractAddress(r) ?? "unknown")); } catch { rs.Completion.TrySetResult(new(rs.Name, "unknown")); } }
+    private async Task HandleAddressToSymbol(SessionOperation.AddressToSymbol a2s) { try { var r = await CliCommandAsync($"info symbol {a2s.Address}"); var sym = r.Split('\n')[0].Trim(); a2s.Completion.TrySetResult(new(sym.Length > 0 ? sym : "??", a2s.Address)); } catch { a2s.Completion.TrySetResult(new("??", a2s.Address)); } }
+    private async Task HandleFindSymbols(SessionOperation.FindSymbols fs) { try { var r = await CliCommandAsync($"info functions {fs.Pattern}"); fs.Completion.TrySetResult(ParseSymbolLines(r)); } catch { fs.Completion.TrySetResult(new()); } }
     private async Task HandleDisassemble(SessionOperation.Disassemble d) { d.Completion.TrySetResult(ParseDisassembly(await _client!.ConsoleCmdAsync($"disassemble {d.Address},+{d.Count * 4}", allowWhileRunning: false))); }
     private async Task HandleListModules(SessionOperation.ListModules lm) { lm.Completion.TrySetResult(new() { new("shared libraries", (await _client!.ConsoleCmdAsync("info sharedlibrary", allowWhileRunning: false)).Trim(), 0) }); }
     private async Task HandleRawGdb(SessionOperation.RawGdb rg)
