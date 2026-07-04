@@ -245,7 +245,82 @@ public class GdbSession : IDisposable
         gr.Completion.TrySetResult(dict);
     }
 
-    private async Task HandleReadMemory(SessionOperation.ReadMemory rm) { try { var r = await _client!.ConsoleCmdAsync($"x/{rm.Size}xb {rm.Address}", allowWhileRunning: false); rm.Completion.TrySetResult(new(rm.Address, rm.Size, r.Trim(), Array.Empty<byte>(), "")); } catch { rm.Completion.TrySetResult(new(rm.Address, 0, "", Array.Empty<byte>(), "")); } }
+    private async Task HandleReadMemory(SessionOperation.ReadMemory rm)
+    {
+        var cleanAddr = rm.Address.Trim();
+        var spaceIdx = cleanAddr.IndexOf(' ');
+        if (spaceIdx > 0) cleanAddr = cleanAddr[..spaceIdx];
+        if (cleanAddr.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            cleanAddr = cleanAddr[2..];
+
+        var result = await _client!.ExecuteAsync(
+            new GdbMi.MICommand("-data-read-memory",
+                $"0x{cleanAddr} x 1 1 {rm.Size}"));
+
+        // GDB returns: memory={addr="...",data=["0x00","0x00"...]}
+        // Parse adaptively: memory can be TupleValue (single row) or ValueListValue (multiple)
+        var memoryVal = result.Find("memory");
+        GdbMi.ValueListValue dataList;
+        if (memoryVal is GdbMi.TupleValue tv)
+            dataList = tv.Find<GdbMi.ValueListValue>("data");
+        else if (memoryVal is GdbMi.ValueListValue vl && vl.Length > 0 && vl.AsArray<GdbMi.TupleValue>()[0] is GdbMi.TupleValue first)
+            dataList = first.Find<GdbMi.ValueListValue>("data");
+        else
+        {
+            rm.Completion.TrySetResult(new($"0x{cleanAddr}", 0, "", Array.Empty<byte>(), ""));
+            return;
+        }
+
+        var hexStrings = dataList.AsStrings;
+        var bytes = hexStrings.Select(s => byte.Parse(s.AsSpan(2),
+            System.Globalization.NumberStyles.HexNumber)).ToArray();
+        var hex = FormatHexDump($"0x{cleanAddr}", bytes);
+        var ascii = BytesToAscii(bytes);
+        rm.Completion.TrySetResult(new($"0x{cleanAddr}", bytes.Length, hex, bytes, ascii));
+    }
+
+    private static string FormatHexDump(string addr, byte[] bytes)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append(addr).Append(": ");
+        for (int i = 0; i < bytes.Length; i++)
+        {
+            if (i > 0 && i % 16 == 0) sb.Append('\n').Append(new string(' ', addr.Length + 2));
+            sb.Append(bytes[i].ToString("x2")).Append(' ');
+        }
+        return sb.ToString().Trim();
+    }
+
+    private static string FormatHexDump(string addr, string hexContents, int size)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append(addr).Append(": ");
+        for (int i = 0; i < hexContents.Length && i / 2 < size; i += 2)
+        {
+            if (i > 0 && i % 32 == 0) sb.Append('\n').Append(new string(' ', addr.Length + 2));
+            sb.Append(hexContents.Substring(i, Math.Min(2, hexContents.Length - i))).Append(' ');
+        }
+        return sb.ToString().Trim();
+    }
+
+    private static byte[] HexToBytes(string hex, int maxBytes)
+    {
+        var bytes = new List<byte>();
+        for (int i = 0; i < hex.Length - 1 && bytes.Count < maxBytes; i += 2)
+        {
+            if (byte.TryParse(hex.AsSpan(i, 2), System.Globalization.NumberStyles.HexNumber, null, out var b))
+                bytes.Add(b);
+        }
+        return bytes.ToArray();
+    }
+
+    private static string BytesToAscii(byte[] bytes)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var b in bytes)
+            sb.Append(b >= 32 && b < 127 ? (char)b : '.');
+        return sb.ToString();
+    }
 
     private async Task HandleGetCallStack(SessionOperation.GetCallStack gcs)
     { var frames = await _cmd!.StackListFrames(_currentThread, 0, (uint)gcs.MaxFrames); gcs.Completion.TrySetResult(FramesToList(frames)); }

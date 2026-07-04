@@ -437,4 +437,42 @@ public class E2ETests
         _output.WriteLine("step ops functional ✓");
         await session.TerminateAsync();
     }
+
+    [Fact]
+    public async Task ReadMemory_ReturnsHexBytesAscii()
+    {
+        using var loggerFactory = LoggerFactory.Create(b => b.AddConsole().SetMinimumLevel(LogLevel.Debug));
+        var logger = loggerFactory.CreateLogger<GdbSession>();
+        using var session = new GdbSession(logger);
+
+        await session.CreateAsync(
+            exe: "/tmp/test_target_linux", args: null, workDir: null, stopAtEntry: true);
+
+        // Get g_counter address
+        var addrRaw = await session.RawGdbAsync("-data-evaluate-expression &g_counter");
+        _output.WriteLine($"g_counter addr raw: {addrRaw}");
+        // Strip symbol suffix if present: "0x555555558040 <g_counter>" → "0x555555558040"
+        var addrStr = addrRaw.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries)[0];
+        _output.WriteLine($"g_counter addr: {addrStr}");
+
+        // Read 16 bytes at g_counter
+        var mem = await session.ReadMemoryAsync(address: addrStr, size: 16);
+        _output.WriteLine($"Memory: addr={mem.Address} size={mem.Size}");
+        _output.WriteLine($"  hex: {mem.Hex[..Math.Min(80, mem.Hex.Length)]}...");
+        _output.WriteLine($"  bytes: [{mem.Bytes.Length}] {string.Join(",", mem.Bytes)}");
+        _output.WriteLine($"  ascii: '{mem.Ascii}'");
+
+        Assert.Equal(16, mem.Bytes.Length);
+        Assert.NotEmpty(mem.Hex);
+        Assert.NotEmpty(mem.Ascii);
+
+        // g_counter starts at 0, so first 4 bytes should be 0
+        Assert.Equal(0, mem.Bytes[0]);
+        Assert.Equal(0, mem.Bytes[1]);
+        Assert.Equal(0, mem.Bytes[2]);
+        Assert.Equal(0, mem.Bytes[3]);
+
+        _output.WriteLine("✓");
+        await session.TerminateAsync();
+    }
 }
