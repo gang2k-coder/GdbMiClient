@@ -553,4 +553,27 @@ public class E2ETests
         _output.WriteLine("go_to + get_reg + list_threads ✓");
         await session.TerminateAsync();
     }
+
+    [Fact]
+    public async Task ListModules_ReturnsSharedLibraries()
+    {
+        using var loggerFactory = LoggerFactory.Create(b => b.AddConsole().SetMinimumLevel(LogLevel.Debug));
+        var logger = loggerFactory.CreateLogger<GdbSession>();
+        using var session = new GdbSession(logger);
+
+        await session.CreateAsync(
+            exe: "/tmp/test_target_linux", args: null, workDir: null, stopAtEntry: true);
+
+        var modules = await session.ListModulesAsync();
+        _output.WriteLine($"list_modules: {modules.Count} entries");
+        foreach (var m in modules.Take(5))
+            _output.WriteLine($"  {m.Name} @ {m.BaseAddress}");
+
+        // At minimum, libc or ld-linux should be loaded
+        Assert.NotEmpty(modules);
+        Assert.Contains(modules, m => m.Name.Contains("libc") || m.Name.Contains("ld-linux") || m.Name.Contains("test_target"));
+        _output.WriteLine("✓");
+
+        await session.TerminateAsync();
+    }
 }

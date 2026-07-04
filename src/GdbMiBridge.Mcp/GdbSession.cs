@@ -388,7 +388,22 @@ public class GdbSession : IDisposable
     private async Task HandleAddressToSymbol(SessionOperation.AddressToSymbol a2s) { try { var r = await CliCommandAsync($"info symbol {a2s.Address}"); var sym = r.Split('\n')[0].Trim(); a2s.Completion.TrySetResult(new(sym.Length > 0 ? sym : "??", a2s.Address)); } catch { a2s.Completion.TrySetResult(new("??", a2s.Address)); } }
     private async Task HandleFindSymbols(SessionOperation.FindSymbols fs) { try { var r = await CliCommandAsync($"info functions {fs.Pattern}"); fs.Completion.TrySetResult(ParseSymbolLines(r)); } catch { fs.Completion.TrySetResult(new()); } }
     private async Task HandleDisassemble(SessionOperation.Disassemble d) { d.Completion.TrySetResult(ParseDisassembly(await _client!.ConsoleCmdAsync($"disassemble {d.Address},+{d.Count * 4}", allowWhileRunning: false))); }
-    private async Task HandleListModules(SessionOperation.ListModules lm) { lm.Completion.TrySetResult(new() { new("shared libraries", (await _client!.ConsoleCmdAsync("info sharedlibrary", allowWhileRunning: false)).Trim(), 0) }); }
+    private async Task HandleListModules(SessionOperation.ListModules lm) { try { var r = await CliCommandAsync("info sharedlibrary"); lm.Completion.TrySetResult(ParseSharedLibs(r)); } catch { lm.Completion.TrySetResult(new()); } }
+
+    private static List<ModuleInfo> ParseSharedLibs(string output)
+    {
+        var list = new List<ModuleInfo>();
+        using var sr = new StringReader(output);
+        while (sr.ReadLine() is string line)
+        {
+            if (!line.StartsWith("0x")) continue;
+            // Format: "0xSTART  0xEND  Yes/No     /path/to/lib"
+            var parts = line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 4)
+                list.Add(new ModuleInfo(parts[^1], parts[0], 0));
+        }
+        return list;
+    }
     private async Task HandleRawGdb(SessionOperation.RawGdb rg)
     {
         if (rg.Command.StartsWith('-'))
