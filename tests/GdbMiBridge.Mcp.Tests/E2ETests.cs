@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Xunit;
 using Xunit.Abstractions;
@@ -614,5 +615,62 @@ public class E2ETests
         _output.WriteLine($"Locals ({locals.Count}): {string.Join(", ", locals.Select(l => $"{l.Name}={l.Value}"))}");
 
         _output.WriteLine("✓");
+    }
+
+    [Fact]
+    public async Task Attach_Detach()
+    {
+        if (await IsPtraceRestricted())
+        {
+            _output.WriteLine("SKIP: ptrace_scope restricts attach (set to 0 to enable)");
+            return;
+        }
+
+        using var loggerFactory = LoggerFactory.Create(b => b.AddConsole().SetMinimumLevel(LogLevel.Debug));
+        var logger = loggerFactory.CreateLogger<GdbSession>();
+
+        // Start a target process that sits in a loop
+        using var targetProcess = new Process
+        {
+            StartInfo = new ProcessStartInfo("/tmp/sleep_loop")
+            {
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }
+        };
+        targetProcess.Start();
+        var pidLine = targetProcess.StandardOutput.ReadLine(); // "PID=XXXXX"
+        var pid = int.Parse(pidLine!.Split('=')[1]);
+        _output.WriteLine($"Target PID={pid}");
+        await Task.Delay(200);
+
+        // Attach
+        using var session = new GdbSession(logger);
+        var info = await session.AttachAsync(pid);
+        _output.WriteLine($"Attach: type={info.Type}, pid={info.ProcessId}");
+        Assert.Equal("attach", info.Type);
+
+        // Inspect — should be inside loop_func
+        var stack = await session.GetCallStackAsync(10);
+        _output.WriteLine($"Stack: {stack.Count} frames");
+        Assert.Contains(stack, f => f.FunctionName is not null && f.FunctionName.Contains("loop_func"));
+
+        // Detach
+        var result = await session.DetachAsync();
+        _output.WriteLine($"Detach: {result}");
+        Assert.Equal("detached", result);
+
+        // Target should still be running
+        Assert.False(targetProcess.HasExited);
+        targetProcess.Kill();
+        _output.WriteLine("✓");
+    }
+
+    private static Task<bool> IsPtraceRestricted()
+    {
+        // Check ptrace_scope; scope=1 means attach restricted
+        try { return Task.FromResult(File.ReadAllText("/proc/sys/kernel/yama/ptrace_scope").Trim() != "0"); }
+        catch { return Task.FromResult(true); }
     }
 }
