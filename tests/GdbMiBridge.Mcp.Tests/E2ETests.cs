@@ -66,7 +66,7 @@ public class E2ETests
             exe: "/tmp/test_target_linux", args: null, workDir: null, stopAtEntry: true);
         _output.WriteLine($"Session: pid={info.ProcessId}");
 
-        // 2. Set go-action breakpoint on loop_body (hit 5 times, capture silently, auto-continue)
+        // 2. Set go-action breakpoint on loop_body (hit 10 times, capture silently, auto-continue)
         var goBp = await session.SetBreakpointAsync(
             loc: "loop_body", capture: true, action: "go", cond: null);
         _output.WriteLine($"Go-action bp: #{goBp.BpNumber}");
@@ -87,12 +87,12 @@ public class E2ETests
         _output.WriteLine($"Go returned: {reason}");
         Assert.Equal("breakpoint-hit", reason);
 
-        // 5. Check captures — should have 5 loop_body + 1 after_loop = 6 snapshots
+        // 5. Check captures — should have 10 loop_body + 1 after_loop = 11 snapshots
         var captures = session.Captures.GetAll();
-        Assert.Equal(6, captures.Count);
+        Assert.Equal(11, captures.Count);
 
-        // loop_body captures (first 5)
-        for (int i = 0; i < 5; i++)
+        // loop_body captures (first 10)
+        for (int i = 0; i < 10; i++)
         {
             var c = captures[i];
             Assert.Equal("loop_body", c.BreakpointLocation);
@@ -103,7 +103,7 @@ public class E2ETests
         }
 
         // after_loop capture (last)
-        var lastCapture = captures[5];
+        var lastCapture = captures[10];
         Assert.Equal("after_loop", lastCapture.BreakpointLocation);
         Assert.NotEmpty(lastCapture.Registers);
         Assert.Equal("after_loop", lastCapture.ProgramCounter.Symbol);
@@ -114,6 +114,97 @@ public class E2ETests
         Assert.Equal("Stopped", status.State);
 
         // 7. Clean up
+        await session.TerminateAsync();
+        _output.WriteLine("Done");
+    }
+
+    [Fact]
+    public async Task GoActionLoop10_BreakAction_CaptureContent()
+    {
+        using var loggerFactory = LoggerFactory.Create(b => b.AddConsole().SetMinimumLevel(LogLevel.Debug));
+        var logger = loggerFactory.CreateLogger<GdbSession>();
+        using var session = new GdbSession(logger);
+
+        // 1. Launch — new target with 10 loop_body iterations
+        var info = await session.CreateAsync(
+            exe: "/tmp/test_target_linux", args: null, workDir: null, stopAtEntry: true);
+        _output.WriteLine($"Session: pid={info.ProcessId}");
+
+        // 2. go-action + capture on loop_body — hits 10 times silently
+        var goBp = await session.SetBreakpointAsync(
+            loc: "loop_body", capture: true, action: "go", cond: null);
+        _output.WriteLine($"Go-action bp {goBp.BpNumber} on loop_body");
+
+        // 3. break-action + capture on after_loop — stops here
+        var breakBp = await session.SetBreakpointAsync(
+            loc: "after_loop", capture: true, action: "break", cond: null);
+        _output.WriteLine($"Break-action bp {breakBp.BpNumber} on after_loop");
+
+        // 4. Clear captures before starting
+        session.Captures.Clear();
+
+        // 5. Go
+        var reason = await session.GoAsync(timeoutMs: 15000);
+        _output.WriteLine($"Go returned: {reason}");
+        Assert.Equal("breakpoint-hit", reason);
+
+        // 6. Verify capture count: 10 loop_body + 1 after_loop = 11
+        var captures = session.Captures.GetAll();
+        Assert.Equal(11, captures.Count);
+        _output.WriteLine($"Total captures: {captures.Count}");
+
+        // 7. Verify each loop_body capture
+        List<string> pcAddresses = new();
+        for (int i = 0; i < 10; i++)
+        {
+            var c = captures[i];
+            _output.WriteLine($"  Capture[{i}]: bp={c.BreakpointNumber} loc={c.BreakpointLocation} " +
+                $"pc={c.ProgramCounter.Address} func={c.ProgramCounter.Symbol} " +
+                $"regs={c.Registers.Count} stack={c.CallStack.Count}");
+
+            Assert.Equal("loop_body", c.BreakpointLocation);
+            Assert.Equal("loop_body", c.ProgramCounter.Symbol);
+
+            // Registers — should have plenty (GDB x86-64 reports 263 including vector regs)
+            Assert.NotEmpty(c.Registers);
+            Assert.True(c.Registers.Count >= 10, $"Expected >= 10 registers, got {c.Registers.Count}");
+            // First 48 are scalar; verify at least the low-numbered ones are hex
+            int hexCount = c.Registers.Values.Take(48).Count(v => v.StartsWith("0x"));
+            Assert.True(hexCount >= 20, $"Expected >= 20 hex scalar registers, got {hexCount}");
+            _output.WriteLine($"        regs={c.Registers.Count} ({hexCount} hex scalars)");
+
+            // Call stack — should have loop_body → main → __libc_start_main
+            Assert.NotEmpty(c.CallStack);
+            var topFrame = c.CallStack[0];
+            Assert.Equal("loop_body", topFrame.FunctionName);
+            _output.WriteLine($"        stack top: {topFrame.FunctionName} @ {topFrame.Address}");
+
+            // Track PC addresses — each loop iteration should be at the same address
+            pcAddresses.Add(c.ProgramCounter.Address);
+
+            // Timestamp should be set
+            Assert.True(c.Timestamp != default);
+        }
+
+        // All loop_body captures should be at the same address
+        var distinctAddrs = pcAddresses.Distinct().ToList();
+        Assert.Single(distinctAddrs);
+        _output.WriteLine($"  All loop_body PCs identical: {distinctAddrs[0]}");
+
+        // 8. Verify after_loop capture (last one)
+        var last = captures[10];
+        Assert.Equal("after_loop", last.BreakpointLocation);
+        Assert.Equal("after_loop", last.ProgramCounter.Symbol);
+        Assert.NotEmpty(last.Registers);
+        Assert.NotEmpty(last.CallStack);
+        Assert.Equal("after_loop", last.CallStack[0].FunctionName);
+        _output.WriteLine($"  Final capture: {last.BreakpointLocation} func={last.ProgramCounter.Symbol} stack frames={last.CallStack.Count}");
+
+        // 9. Verify we are stopped
+        var status = await session.StatusAsync();
+        Assert.Equal("Stopped", status.State);
+
+        // 10. Clean up
         await session.TerminateAsync();
         _output.WriteLine("Done");
     }
