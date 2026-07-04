@@ -669,8 +669,35 @@ public class E2ETests
 
     private static Task<bool> IsPtraceRestricted()
     {
-        // Check ptrace_scope; scope=1 means attach restricted
         try { return Task.FromResult(File.ReadAllText("/proc/sys/kernel/yama/ptrace_scope").Trim() != "0"); }
         catch { return Task.FromResult(true); }
+    }
+
+    [Fact]
+    public async Task Disassemble_And_GetReg()
+    {
+        using var loggerFactory = LoggerFactory.Create(b => b.AddConsole().SetMinimumLevel(LogLevel.Debug));
+        var logger = loggerFactory.CreateLogger<GdbSession>();
+        using var session = new GdbSession(logger);
+
+        await session.CreateAsync(
+            exe: "/tmp/test_target_linux", args: null, workDir: null, stopAtEntry: true);
+
+        var pc = await session.GetProgramCounterAsync();
+        _output.WriteLine($"PC: {pc.Symbol} @ {pc.Address}");
+
+        var disasm = await session.DisassembleAsync(address: pc.Address, count: 5);
+        _output.WriteLine($"disassemble: {disasm.Count} lines");
+        foreach (var d in disasm)
+            _output.WriteLine($"  {d.Address}: {d.Instruction}");
+        Assert.NotEmpty(disasm);
+
+        var regs = await session.GetRegistersAsync();
+        var ripMatch = regs.FirstOrDefault(kv => kv.Value.StartsWith("0x"));
+        _output.WriteLine($"get_reg({ripMatch.Key}) = {ripMatch.Value}");
+        Assert.NotEqual(default, ripMatch);
+
+        _output.WriteLine("✓");
+        await session.TerminateAsync();
     }
 }

@@ -387,7 +387,7 @@ public class GdbSession : IDisposable
     private async Task HandleResolveSymbol(SessionOperation.ResolveSymbol rs) { _ = rs; try { var r = await CliCommandAsync($"info address {rs.Name}"); rs.Completion.TrySetResult(new(rs.Name, ExtractAddress(r) ?? "unknown")); } catch { rs.Completion.TrySetResult(new(rs.Name, "unknown")); } }
     private async Task HandleAddressToSymbol(SessionOperation.AddressToSymbol a2s) { try { var r = await CliCommandAsync($"info symbol {a2s.Address}"); var sym = r.Split('\n')[0].Trim(); a2s.Completion.TrySetResult(new(sym.Length > 0 ? sym : "??", a2s.Address)); } catch { a2s.Completion.TrySetResult(new("??", a2s.Address)); } }
     private async Task HandleFindSymbols(SessionOperation.FindSymbols fs) { try { var r = await CliCommandAsync($"info functions {fs.Pattern}"); fs.Completion.TrySetResult(ParseSymbolLines(r)); } catch { fs.Completion.TrySetResult(new()); } }
-    private async Task HandleDisassemble(SessionOperation.Disassemble d) { d.Completion.TrySetResult(ParseDisassembly(await _client!.ConsoleCmdAsync($"disassemble {d.Address},+{d.Count * 4}", allowWhileRunning: false))); }
+    private async Task HandleDisassemble(SessionOperation.Disassemble d) { try { d.Completion.TrySetResult(ParseDisassembly(await CliCommandAsync($"disassemble {d.Address},+{d.Count * 4}"))); } catch { d.Completion.TrySetResult(new()); } }
     private async Task HandleListModules(SessionOperation.ListModules lm) { try { var r = await CliCommandAsync("info sharedlibrary"); lm.Completion.TrySetResult(ParseSharedLibs(r)); } catch { lm.Completion.TrySetResult(new()); } }
 
     private static List<ModuleInfo> ParseSharedLibs(string output)
