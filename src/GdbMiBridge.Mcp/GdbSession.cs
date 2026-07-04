@@ -58,6 +58,7 @@ public class GdbSession : IDisposable
     public Task<string> StepOutAsync() => PostAsync<string>(new SessionOperation.StepOut(new()));
     public Task<string> GoToAsync(string location) => PostAsync<string>(new SessionOperation.GoTo(location, new()));
     public async Task<BreakpointConfig> SetBreakpointAsync(string loc, bool capture, string action, string? cond) { var tcs = new TaskCompletionSource<BreakpointConfig>(); await _channel.Writer.WriteAsync(new SessionOperation.SetBreakpoint(loc, capture, action, cond, tcs)); return await tcs.Task; }
+    public async Task<BreakpointConfig> SetHardwareBreakpointAsync(string address, string access, int size, bool capture) { var tcs = new TaskCompletionSource<BreakpointConfig>(); await _channel.Writer.WriteAsync(new SessionOperation.SetHardwareBreakpoint(address, access, size, capture, tcs)); return await tcs.Task; }
     public Task<bool> RemoveBreakpointAsync(string id) => PostAsync<bool>(new SessionOperation.RemoveBreakpoint(id, new()));
     public Task<bool> EnableBreakpointAsync(string id, bool enabled) => PostAsync<bool>(new SessionOperation.EnableBreakpoint(id, enabled, new()));
     public Task<Dictionary<string, string>> GetRegistersAsync() => PostAsync<Dictionary<string, string>>(new SessionOperation.GetRegisters(new()));
@@ -103,6 +104,7 @@ public class GdbSession : IDisposable
             case SessionOperation.StepOut so2: await HandleStep(so2.Completion, () => _cmd!.ExecFinish(_currentThread)); break;
             case SessionOperation.GoTo gt: await HandleGoTo(gt); break;
             case SessionOperation.SetBreakpoint sb: await HandleSetBreakpoint(sb); break;
+            case SessionOperation.SetHardwareBreakpoint hb: await HandleSetHwBreakpoint(hb); break;
             case SessionOperation.RemoveBreakpoint rb: await HandleRemoveBp(rb); break;
             case SessionOperation.EnableBreakpoint eb: await HandleEnableBp(eb); break;
             case SessionOperation.ListBreakpoints lb: lb.Completion.TrySetResult(_bpManager.GetAll()); break;
@@ -217,6 +219,16 @@ public class GdbSession : IDisposable
         var number = bkpt.FindString("number");
         _bpManager.Register(number, new(number, sb.Location, sb.Capture, sb.Action, sb.Condition, true));
         sb.Completion.TrySetResult(new(number, sb.Location, sb.Capture, sb.Action, sb.Condition, true));
+    }
+
+    private async Task HandleSetHwBreakpoint(SessionOperation.SetHardwareBreakpoint hb)
+    {
+        var result = await _cmd!.BreakWatch(hb.Address, (uint)hb.Size, hb.Access);
+        var bkpt = result.Find<GdbMi.TupleValue>("wpt");
+        var number = bkpt.FindString("number");
+        var loc = $"[{hb.Access} @ {hb.Address}, size={hb.Size}]";
+        _bpManager.Register(number, new(number, loc, hb.Capture, "break", null, true));
+        hb.Completion.TrySetResult(new(number, loc, hb.Capture, "break", null, true));
     }
 
     private async Task HandleRemoveBp(SessionOperation.RemoveBreakpoint rb)

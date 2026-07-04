@@ -52,6 +52,10 @@ public abstract record SessionOperation
     public record ListBreakpoints(
         TaskCompletionSource<List<BreakpointConfig>> Completion) : SessionOperation;
 
+    public record SetHardwareBreakpoint(string Address, string Access, int Size,
+        bool Capture,
+        TaskCompletionSource<BreakpointConfig> Completion) : SessionOperation;
+
     // ── State ──
     public record GetRegisters(
         TaskCompletionSource<Dictionary<string, string>> Completion) : SessionOperation;

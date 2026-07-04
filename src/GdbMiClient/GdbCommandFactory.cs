@@ -51,6 +51,16 @@ public class GdbCommandFactory
     public async Task<Results> BreakInsertRaw(string rawArgs)
         => await _client.ExecuteAsync(new MICommand("-break-insert", rawArgs));
 
+    /// <summary>Set a hardware watchpoint (data breakpoint). access: "write", "read", or "access".</summary>
+    public async Task<Results> BreakWatch(string address, uint size, string access = "write")
+    {
+        string flag = access switch { "read" => "-r ", "access" => "-a ", _ => "" };
+        // GDB watch requires a typed pointer expression: *(type*)(address)
+        string type = size switch { 1 => "char", 2 => "short", 4 => "int", 8 => "long long", _ => "int" };
+        return await _client.ExecuteAsync(new MICommand("-break-watch",
+            $"{flag}*({type}*)({address})"));
+    }
+
     public async Task<Results> BreakDelete(string bkptno)
         => await _client.ExecuteAsync(new MICommand("-break-delete", bkptno));
 

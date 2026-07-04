@@ -32,4 +32,12 @@ public class BreakpointTools(GdbSession session)
     [McpServerTool, Description("List all breakpoints in the current session.")]
     public List<BreakpointConfig> ListBreakpoints()
         => session.Breakpoints.GetAll();
+
+    [McpServerTool, Description("Set a hardware data breakpoint (watchpoint) at an address.")]
+    public async Task<BreakpointConfig> SetHardwareBreakpoint(
+        [Description("Hex address, e.g. '0x601040'.")] string address,
+        [Description("Access type: 'write', 'read', or 'access'.")] string access = "write",
+        [Description("Watch size in bytes: 1, 2, 4, 8.")] int size = 4,
+        [Description("Capture state when hit.")] bool capture = true)
+        => await session.SetHardwareBreakpointAsync(address, access, size, capture);
 }
