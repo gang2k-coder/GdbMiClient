@@ -330,8 +330,14 @@ public class GdbSession : IDisposable
     {
         var result = await _cmd!.ThreadInfo();
         var threads = new List<ThreadInfo>();
-        var tl = result.Find<GdbMi.ResultListValue>("threads");
-        foreach (GdbMi.TupleValue t in tl.FindAll<GdbMi.TupleValue>("thread"))
+        var tl = result.Find("threads");
+        var threadTuples = tl switch
+        {
+            GdbMi.ValueListValue vl => vl.AsArray<GdbMi.TupleValue>(),
+            GdbMi.ResultListValue rl => rl.FindAll<GdbMi.TupleValue>("thread"),
+            _ => Array.Empty<GdbMi.TupleValue>()
+        };
+        foreach (GdbMi.TupleValue t in threadTuples)
             threads.Add(new(t.FindInt("id"), t.FindString("id") == result.TryFindString("current-thread-id")));
         lt.Completion.TrySetResult(threads);
     }

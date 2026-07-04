@@ -515,4 +515,42 @@ public class E2ETests
         _output.WriteLine("symbol tools ✓");
         await session.TerminateAsync();
     }
+
+    [Fact]
+    public async Task GoTo_GetReg_ListThreads()
+    {
+        using var loggerFactory = LoggerFactory.Create(b => b.AddConsole().SetMinimumLevel(LogLevel.Debug));
+        var logger = loggerFactory.CreateLogger<GdbSession>();
+        using var session = new GdbSession(logger);
+
+        await session.CreateAsync(
+            exe: "/tmp/test_target_linux", args: null, workDir: null, stopAtEntry: true);
+
+        // go_to: run to after_loop using a temporary breakpoint
+        var reason = await session.GoToAsync("after_loop");
+        _output.WriteLine($"go_to after_loop → {reason}");
+        Assert.Equal("breakpoint-hit", reason);
+
+        var pc = await session.GetProgramCounterAsync();
+        Assert.Contains("after_loop", pc.Symbol);
+
+        // get_reg: query single register (rip/pc)
+        var regs = await session.GetRegistersAsync();
+        var pcReg = regs.FirstOrDefault(kv => kv.Key == "16" || kv.Key == "rip" || kv.Key == "pc");
+        if (pcReg.Key is not null)
+        {
+            _output.WriteLine($"get_reg({pcReg.Key}) = {pcReg.Value}");
+            Assert.StartsWith("0x", pcReg.Value);
+        }
+        _output.WriteLine($"regs: {regs.Count} total, first few: {string.Join(", ", regs.Take(5).Select(kv => $"{kv.Key}={kv.Value}"))}");
+
+        // list_threads
+        var threads = await session.ListThreadsAsync();
+        _output.WriteLine($"list_threads: {threads.Count} thread(s)");
+        Assert.Single(threads);
+        Assert.True(threads[0].IsCurrent);
+
+        _output.WriteLine("go_to + get_reg + list_threads ✓");
+        await session.TerminateAsync();
+    }
 }
