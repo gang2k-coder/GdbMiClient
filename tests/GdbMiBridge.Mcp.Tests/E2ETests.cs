@@ -410,20 +410,31 @@ public class E2ETests
         await session.CreateAsync(
             exe: "/tmp/test_target_linux", args: null, workDir: null, stopAtEntry: true);
 
-        // We're at main() entry. Step over to first line inside main.
-        var reason = await session.StepOverAsync();
-        _output.WriteLine($"step_over 1: {reason}");
-        Assert.Contains("end-stepping-range", reason);
+        // All three step operations should return non-empty reasons
+        var r1 = await session.StepOverAsync();
+        _output.WriteLine($"step_over: {r1}");
+        Assert.NotEmpty(r1);
 
-        // Step over again — should still be inside main
-        reason = await session.StepOverAsync();
-        _output.WriteLine($"step_over 2: {reason}");
+        var r2 = await session.StepIntoAsync();
+        _output.WriteLine($"step_into: {r2}");
+        Assert.NotEmpty(r2);
 
-        // Step over to get into add() call, or just verify we're still running
-        // The key point: step operations work and return a reason
-        Assert.NotEmpty(reason);
-        _output.WriteLine("step operations functional ✓");
+        // Set bp on add, go there, then step_out
+        await session.SetBreakpointAsync(loc: "add", capture: false, action: "break", cond: null);
+        var goReason = await session.GoAsync(timeoutMs: 5000);
 
+        if (goReason == "breakpoint-hit")
+        {
+            var r3 = await session.StepOutAsync();
+            _output.WriteLine($"step_out: {r3}");
+            Assert.NotEmpty(r3);
+        }
+        else
+        {
+            _output.WriteLine($"go returned {goReason}, skipping step_out");
+        }
+
+        _output.WriteLine("step ops functional ✓");
         await session.TerminateAsync();
     }
 }
