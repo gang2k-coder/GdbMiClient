@@ -58,7 +58,7 @@ public class GdbCommandFactory
         // GDB watch requires a typed pointer expression: *(type*)(address)
         string type = size switch { 1 => "char", 2 => "short", 4 => "int", 8 => "long long", _ => "int" };
         return await _client.ExecuteAsync(new MICommand("-break-watch",
-            $"{flag}*({type}*)({address})"));
+            $"{flag}*({type}*){address}"));
     }
 
     public async Task<Results> BreakDelete(string bkptno)

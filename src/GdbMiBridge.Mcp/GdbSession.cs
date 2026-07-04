@@ -270,7 +270,23 @@ public class GdbSession : IDisposable
     private async Task HandleFindSymbols(SessionOperation.FindSymbols fs) { fs.Completion.TrySetResult(ParseSymbolLines(await _client!.ConsoleCmdAsync($"info functions {fs.Pattern}", allowWhileRunning: false))); }
     private async Task HandleDisassemble(SessionOperation.Disassemble d) { d.Completion.TrySetResult(ParseDisassembly(await _client!.ConsoleCmdAsync($"disassemble {d.Address},+{d.Count * 4}", allowWhileRunning: false))); }
     private async Task HandleListModules(SessionOperation.ListModules lm) { lm.Completion.TrySetResult(new() { new("shared libraries", (await _client!.ConsoleCmdAsync("info sharedlibrary", allowWhileRunning: false)).Trim(), 0) }); }
-    private async Task HandleRawGdb(SessionOperation.RawGdb rg) { rg.Completion.TrySetResult(await _client!.ConsoleCmdAsync(rg.Command, allowWhileRunning: true)); }
+    private async Task HandleRawGdb(SessionOperation.RawGdb rg)
+    {
+        if (rg.Command.StartsWith('-'))
+        {
+            // MI command: use ExecuteAsync, result comes in ^done
+            var results = await _client!.ExecuteAsync(new GdbMi.MICommand(rg.Command, ""));
+            // For -data-evaluate-expression, return just the value. Otherwise dump all fields.
+            string output = results.TryFindString("value")
+                ?? string.Join("; ", results.Content.Select(c => $"{c.Name}={c.Value}"));
+            rg.Completion.TrySetResult(output);
+        }
+        else
+        {
+            // CLI command: use ConsoleCmdAsync
+            rg.Completion.TrySetResult(await _client!.ConsoleCmdAsync(rg.Command, allowWhileRunning: true));
+        }
+    }
 
     private async Task HandleDetach(SessionOperation.Detach d) { await _cmd!.TargetDetach(); CleanupSession(); d.Completion.TrySetResult("detached"); }
     private async Task HandleTerminate(SessionOperation.Terminate t) { await _cmd!.Terminate(); CleanupSession(); t.Completion.TrySetResult("terminated"); }
@@ -301,7 +317,7 @@ public class GdbSession : IDisposable
             return;
         }
 
-        if (reason == "breakpoint-hit" && bkptno is not null)
+        if ((reason == "breakpoint-hit" || reason == "watchpoint-trigger") && bkptno is not null)
         {
             var (shouldCapture, shouldContinue) = _bpManager.OnHit(bkptno);
             if (shouldCapture)

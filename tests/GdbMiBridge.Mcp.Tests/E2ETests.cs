@@ -208,4 +208,33 @@ public class E2ETests
         await session.TerminateAsync();
         _output.WriteLine("Done");
     }
+
+    [Fact]
+    public async Task HardwareBreakpoint_Watchpoint_Triggers()
+    {
+        using var loggerFactory = LoggerFactory.Create(b => b.AddConsole().SetMinimumLevel(LogLevel.Debug));
+        var logger = loggerFactory.CreateLogger<GdbSession>();
+        using var session = new GdbSession(logger);
+
+        // 1. Launch — stop at entry
+        await session.CreateAsync(
+            exe: "/tmp/test_target_linux", args: null, workDir: null, stopAtEntry: true);
+
+        // 2. Set hardware write watchpoint using expression directly
+        // bypass symbol resolution to isolate the watchpoint test
+        await session.RawGdbAsync("-break-watch *(int*)&g_counter");
+        _output.WriteLine("Watchpoint set via expression");
+
+        // 3. Go — first g_counter++ (inside add()) triggers it
+        var reason = await session.GoAsync(timeoutMs: 5000);
+        _output.WriteLine($"Go returned: {reason}");
+        Assert.Contains("watchpoint", reason);
+
+        // 4. Stopped
+        Assert.Equal("Stopped", (await session.StatusAsync()).State);
+
+        // 5. Clean up
+        await session.TerminateAsync();
+        _output.WriteLine("Done");
+    }
 }
