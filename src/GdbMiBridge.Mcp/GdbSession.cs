@@ -98,7 +98,7 @@ public class GdbSession : IDisposable
         {
             case SessionOperation.Create c: await HandleCreate(c); break;
             case SessionOperation.Attach a: a.Completion.TrySetResult(new("attach", null, null)); break;
-            case SessionOperation.LoadDump ld: ld.Completion.TrySetResult(new("load_dump", null, null)); break;
+            case SessionOperation.LoadDump ld: await HandleLoadDump(ld); break;
             case SessionOperation.Go g: await HandleGo(g); break;
             case SessionOperation.StepInto si: await HandleStep(si.Completion, () => _cmd!.ExecStep(_currentThread)); break;
             case SessionOperation.StepOver so: await HandleStep(so.Completion, () => _cmd!.ExecNext(_currentThread)); break;
@@ -420,6 +420,21 @@ public class GdbSession : IDisposable
             // CLI command: use ConsoleCmdAsync
             rg.Completion.TrySetResult(await _client!.ConsoleCmdAsync(rg.Command, allowWhileRunning: true));
         }
+    }
+
+    private async Task HandleLoadDump(SessionOperation.LoadDump ld)
+    {
+        _transport = new GdbMi.LocalTransport("gdb", "--interpreter=mi3", _logger as Microsoft.Extensions.Logging.ILogger);
+        _client = new GdbMi.GdbMiClient(_transport, _logger as Microsoft.Extensions.Logging.ILogger<GdbMi.GdbMiClient>);
+        _cmd = _client.Cmd;
+        await _client.ConnectAsync(CancellationToken.None);
+        _readLoopCts = new CancellationTokenSource();
+        _readLoopTask = ReadLoopAsync(_readLoopCts.Token);
+
+        // GDB can load core dumps with just -target-select core
+        // The executable is embedded in the core file
+        await _client.ExecuteAsync(new GdbMi.MICommand("-target-select", $"core {ld.Path}"));
+        ld.Completion.TrySetResult(new("load_dump", _transport.DebuggerPid, null));
     }
 
     private async Task HandleDetach(SessionOperation.Detach d) { await _cmd!.TargetDetach(); CleanupSession(); d.Completion.TrySetResult("detached"); }
