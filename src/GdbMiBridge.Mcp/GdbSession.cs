@@ -297,7 +297,7 @@ public class GdbSession : IDisposable
             if (shouldContinue)
             {
                 _goTimeoutCts?.Cancel();
-                await _cmd!.ExecContinue();
+                await SendAndReadInline("-exec-continue");
                 return;
             }
         }
@@ -308,12 +308,47 @@ public class GdbSession : IDisposable
         tcs?.TrySetResult(reason.Length > 0 ? reason : "stopped");
     }
 
+    /// <summary>
+    /// Send an MI command and read the response inline. Used during capture
+    /// (which runs in the ReadLoop thread) to avoid deadlocking on ExecuteAsync.
+    /// </summary>
+    private async Task<GdbMi.Results> SendAndReadInline(string miCmd)
+    {
+        uint token = Interlocked.Increment(ref _nextToken);
+        await _transport!.SendAsync($"{token}{miCmd}\n", CancellationToken.None);
+
+        while (!_transport.IsClosed)
+        {
+            var line = await _transport.ReadLineAsync(CancellationToken.None);
+            if (line is null) break;
+
+            if (line.StartsWith($"{token}^"))
+            {
+                var rest = line[(token.ToString().Length + 1)..].Trim();
+                return new GdbMi.MIResultParser().ParseCommandOutput(rest);
+            }
+            // Feed other lines to GdbMiClient so state stays updated
+            _client?.ProcessLine(line);
+            // If we see a *stopped while waiting for a capture command, we're in trouble
+        }
+        return new GdbMi.Results(GdbMi.ResultClass.Error);
+    }
+    private uint _nextToken = 10000; // separate token space for capture commands
+
     private async Task<CaptureResult> CaptureAsync(string bpNumber, string location)
     {
-        Dictionary<string, string> r; try { r = new(); foreach (var x in await _cmd!.DataListRegisterValues(_currentThread)) r[x.TryFindString("number") ?? "?"] = x.TryFindString("value") ?? "?"; } catch { r = new(); }
-        ProgramCounterInfo p; try { var f = (await _cmd!.StackInfoFrame()).Find<GdbMi.TupleValue>("frame"); p = new(f.TryFindString("addr") ?? "", f.TryFindString("func") ?? "", ""); } catch { p = new("", "", ""); }
-        List<GdbMi.FrameInfo> s; try { s = FramesToList(await _cmd!.StackListFrames(_currentThread)); } catch { s = new(); }
-        List<VariableInfo> l; try { l = ParseVariables(await _cmd!.StackListLocals(1, _currentThread, 0)); } catch { l = new(); }
+        Dictionary<string, string> r = new();
+        try { var res = await SendAndReadInline($"-data-list-register-values x"); foreach (GdbMi.TupleValue x in res.Find<GdbMi.ValueListValue>("register-values").AsArray<GdbMi.TupleValue>()) r[x.TryFindString("number") ?? "?"] = x.TryFindString("value") ?? "?"; } catch { }
+
+        ProgramCounterInfo p = new("", "", "");
+        try { var res = await SendAndReadInline("-stack-info-frame"); var f = res.Find<GdbMi.TupleValue>("frame"); p = new(f.TryFindString("addr") ?? "", f.TryFindString("func") ?? "", ""); } catch { }
+
+        List<GdbMi.FrameInfo> s = new();
+        try { var res = await SendAndReadInline($"-stack-list-frames 0 20"); var stack = res.Find<GdbMi.ListValue>("stack"); if (stack is GdbMi.ResultListValue rv) s = FramesToList(rv.FindAll<GdbMi.TupleValue>("frame")); } catch { }
+
+        List<VariableInfo> l = new();
+        try { var res = await SendAndReadInline($"-stack-list-locals --thread 1 --frame 0 1"); l = ParseVariables(res.Find("locals")); } catch { }
+
         return new(bpNumber, location, r, p, s, null, l, DateTimeOffset.UtcNow);
     }
 
