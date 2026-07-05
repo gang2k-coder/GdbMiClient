@@ -229,7 +229,19 @@ public class GdbSession : IDisposable
 
     private async Task HandleSetBreakpoint(SessionOperation.SetBreakpoint sb)
     {
-        var result = await _cmd!.BreakInsert(sb.Location, 0, condition: sb.Condition, enabled: true);
+        GdbMi.Results result;
+        var loc = sb.Location;
+        // Detect file:line format (e.g. "test_target_linux.c:47")
+        var colonIdx = loc.LastIndexOf(':');
+        if (colonIdx > 0 && uint.TryParse(loc[(colonIdx + 1)..], out var lineNum))
+        {
+            var file = loc[..colonIdx];
+            result = await _cmd!.BreakInsert(file, lineNum, condition: sb.Condition, enabled: true);
+        }
+        else
+        {
+            result = await _cmd!.BreakInsertFunction(loc);
+        }
         var bkpt = result.Find<GdbMi.TupleValue>("bkpt");
         var number = bkpt.FindString("number");
         _bpManager.Register(number, new(number, sb.Location, sb.Capture, sb.Action, sb.Condition, true));
