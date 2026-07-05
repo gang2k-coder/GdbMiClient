@@ -23,7 +23,8 @@ public class GdbSession : IDisposable
     private GdbMi.GdbMiClient? _client;
     private GdbMi.GdbCommandFactory? _cmd;
     private TaskCompletionSource<string>? _waitingForStop;
-    private TaskCompletionSource<SessionInfo>? _waitingForFirstStop; // Create completion
+    private TaskCompletionSource<SessionInfo>? _waitingForFirstStop; // Create/Attach/LoadDump completion
+    private string _firstStopType = "create"; // session type for _waitingForFirstStop
     private CancellationTokenSource? _goTimeoutCts;
     private Task? _readLoopTask;
     private CancellationTokenSource? _readLoopCts;
@@ -94,39 +95,51 @@ public class GdbSession : IDisposable
 
     private async Task ProcessOperationAsync(SessionOperation op)
     {
-        switch (op)
+        try
         {
-            case SessionOperation.Create c: await HandleCreate(c); break;
-            case SessionOperation.Attach a: await HandleAttach(a); break;
-            case SessionOperation.LoadDump ld: await HandleLoadDump(ld); break;
-            case SessionOperation.Go g: await HandleGo(g); break;
-            case SessionOperation.StepInto si: await HandleStep(si.Completion, () => _cmd!.ExecStep(_currentThread)); break;
-            case SessionOperation.StepOver so: await HandleStep(so.Completion, () => _cmd!.ExecNext(_currentThread)); break;
-            case SessionOperation.StepOut so2: await HandleStep(so2.Completion, () => _cmd!.ExecFinish(_currentThread)); break;
-            case SessionOperation.GoTo gt: await HandleGoTo(gt); break;
-            case SessionOperation.SetBreakpoint sb: await HandleSetBreakpoint(sb); break;
-            case SessionOperation.SetHardwareBreakpoint hb: await HandleSetHwBreakpoint(hb); break;
-            case SessionOperation.RemoveBreakpoint rb: await HandleRemoveBp(rb); break;
-            case SessionOperation.EnableBreakpoint eb: await HandleEnableBp(eb); break;
-            case SessionOperation.ListBreakpoints lb: lb.Completion.TrySetResult(_bpManager.GetAll()); break;
-            case SessionOperation.GetRegisters gr: await HandleGetRegisters(gr); break;
-            case SessionOperation.ReadMemory rm: await HandleReadMemory(rm); break;
-            case SessionOperation.GetCallStack gcs: await HandleGetCallStack(gcs); break;
-            case SessionOperation.ListThreads lt: await HandleListThreads(lt); break;
-            case SessionOperation.GetLocalVariables glv: await HandleGetLocalVariables(glv); break;
-            case SessionOperation.GetProgramCounter gpc: await HandleGetProgramCounter(gpc); break;
-            case SessionOperation.CaptureState cs: cs.Completion.TrySetResult(await CaptureAsync("manual", "manual")); break;
-            case SessionOperation.GetCaptures gc: gc.Completion.TrySetResult(_captures.GetAll()); break;
-            case SessionOperation.ClearCaptures cc: _captures.Clear(); cc.Completion.TrySetResult(true); break;
-            case SessionOperation.ResolveSymbol rs: await HandleResolveSymbol(rs); break;
-            case SessionOperation.AddressToSymbol a2s: await HandleAddressToSymbol(a2s); break;
-            case SessionOperation.FindSymbols fs: await HandleFindSymbols(fs); break;
-            case SessionOperation.Disassemble d: await HandleDisassemble(d); break;
-            case SessionOperation.ListModules lm: await HandleListModules(lm); break;
-            case SessionOperation.RawGdb rg: await HandleRawGdb(rg); break;
-            case SessionOperation.Status st: st.Completion.TrySetResult(new(State.ToString())); break;
-            case SessionOperation.Detach d2: await HandleDetach(d2); break;
-            case SessionOperation.Terminate t: await HandleTerminate(t); break;
+            switch (op)
+            {
+                case SessionOperation.Create c: await HandleCreate(c); break;
+                case SessionOperation.Attach a: await HandleAttach(a); break;
+                case SessionOperation.LoadDump ld: await HandleLoadDump(ld); break;
+                case SessionOperation.Go g: await HandleGo(g); break;
+                case SessionOperation.StepInto si: await HandleStep(si.Completion, () => _cmd!.ExecStep(_currentThread)); break;
+                case SessionOperation.StepOver so: await HandleStep(so.Completion, () => _cmd!.ExecNext(_currentThread)); break;
+                case SessionOperation.StepOut so2: await HandleStep(so2.Completion, () => _cmd!.ExecFinish(_currentThread)); break;
+                case SessionOperation.GoTo gt: await HandleGoTo(gt); break;
+                case SessionOperation.SetBreakpoint sb: await HandleSetBreakpoint(sb); break;
+                case SessionOperation.SetHardwareBreakpoint hb: await HandleSetHwBreakpoint(hb); break;
+                case SessionOperation.RemoveBreakpoint rb: await HandleRemoveBp(rb); break;
+                case SessionOperation.EnableBreakpoint eb: await HandleEnableBp(eb); break;
+                case SessionOperation.ListBreakpoints lb: lb.Completion.TrySetResult(_bpManager.GetAll()); break;
+                case SessionOperation.GetRegisters gr: await HandleGetRegisters(gr); break;
+                case SessionOperation.ReadMemory rm: await HandleReadMemory(rm); break;
+                case SessionOperation.GetCallStack gcs: await HandleGetCallStack(gcs); break;
+                case SessionOperation.ListThreads lt: await HandleListThreads(lt); break;
+                case SessionOperation.GetLocalVariables glv: await HandleGetLocalVariables(glv); break;
+                case SessionOperation.GetProgramCounter gpc: await HandleGetProgramCounter(gpc); break;
+                case SessionOperation.CaptureState cs: cs.Completion.TrySetResult(await CaptureAsync("manual", "manual")); break;
+                case SessionOperation.GetCaptures gc: gc.Completion.TrySetResult(_captures.GetAll()); break;
+                case SessionOperation.ClearCaptures cc: _captures.Clear(); cc.Completion.TrySetResult(true); break;
+                case SessionOperation.ResolveSymbol rs: await HandleResolveSymbol(rs); break;
+                case SessionOperation.AddressToSymbol a2s: await HandleAddressToSymbol(a2s); break;
+                case SessionOperation.FindSymbols fs: await HandleFindSymbols(fs); break;
+                case SessionOperation.Disassemble d: await HandleDisassemble(d); break;
+                case SessionOperation.ListModules lm: await HandleListModules(lm); break;
+                case SessionOperation.RawGdb rg: await HandleRawGdb(rg); break;
+                case SessionOperation.Status st: st.Completion.TrySetResult(new(State.ToString())); break;
+                case SessionOperation.Detach d2: await HandleDetach(d2); break;
+                case SessionOperation.Terminate t: await HandleTerminate(t); break;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            var completionProp = op.GetType().GetProperty("Completion");
+            if (completionProp?.GetValue(op) is { } tcs)
+            {
+                var trySetEx = tcs.GetType().GetMethod("TrySetException", [typeof(Exception)]);
+                trySetEx?.Invoke(tcs, [ex]);
+            }
         }
     }
 
@@ -182,6 +195,7 @@ public class GdbSession : IDisposable
         await _cmd.ExecRun();
 
         // First *stopped completes the Create operation
+        _firstStopType = "create";
         _waitingForFirstStop = c.Completion;
     }
 
@@ -345,7 +359,7 @@ public class GdbSession : IDisposable
     private async Task HandleGetLocalVariables(SessionOperation.GetLocalVariables glv)
     { glv.Completion.TrySetResult(ParseVariables(await _cmd!.StackListLocals(1, _currentThread, (uint)glv.FrameIndex))); }
 
-    private async Task HandleGetProgramCounter(SessionOperation.GetProgramCounter gpc) { try { var f = (await _cmd!.StackInfoFrame()).Find<GdbMi.TupleValue>("frame"); gpc.Completion.TrySetResult(new(f.TryFindString("addr") ?? "", f.TryFindString("func") ?? "", "")); } catch { gpc.Completion.TrySetResult(new("?", "?", "")); } }
+    private async Task HandleGetProgramCounter(SessionOperation.GetProgramCounter gpc) { var f = (await _cmd!.StackInfoFrame()).Find<GdbMi.TupleValue>("frame"); gpc.Completion.TrySetResult(new(f.TryFindString("addr") ?? "", f.TryFindString("func") ?? "", "")); }
 
     /// <summary>Run a CLI command and capture console output (~ lines). Uses SendAndReadInline pattern.</summary>
     /// <summary>Run a CLI command and capture console output. Pauses background ReadLoop to avoid read conflicts.</summary>
@@ -384,11 +398,11 @@ public class GdbSession : IDisposable
         }
     }
 
-    private async Task HandleResolveSymbol(SessionOperation.ResolveSymbol rs) { _ = rs; try { var r = await CliCommandAsync($"info address {rs.Name}"); rs.Completion.TrySetResult(new(rs.Name, ExtractAddress(r) ?? "unknown")); } catch { rs.Completion.TrySetResult(new(rs.Name, "unknown")); } }
-    private async Task HandleAddressToSymbol(SessionOperation.AddressToSymbol a2s) { try { var r = await CliCommandAsync($"info symbol {a2s.Address}"); var sym = r.Split('\n')[0].Trim(); a2s.Completion.TrySetResult(new(sym.Length > 0 ? sym : "??", a2s.Address)); } catch { a2s.Completion.TrySetResult(new("??", a2s.Address)); } }
-    private async Task HandleFindSymbols(SessionOperation.FindSymbols fs) { try { var r = await CliCommandAsync($"info functions {fs.Pattern}"); fs.Completion.TrySetResult(ParseSymbolLines(r)); } catch { fs.Completion.TrySetResult(new()); } }
-    private async Task HandleDisassemble(SessionOperation.Disassemble d) { try { d.Completion.TrySetResult(ParseDisassembly(await CliCommandAsync($"disassemble {d.Address},+{d.Count * 4}"))); } catch { d.Completion.TrySetResult(new()); } }
-    private async Task HandleListModules(SessionOperation.ListModules lm) { try { var r = await CliCommandAsync("info sharedlibrary"); lm.Completion.TrySetResult(ParseSharedLibs(r)); } catch { lm.Completion.TrySetResult(new()); } }
+    private async Task HandleResolveSymbol(SessionOperation.ResolveSymbol rs) { _ = rs; var r = await CliCommandAsync($"info address {rs.Name}"); rs.Completion.TrySetResult(new(rs.Name, ExtractAddress(r) ?? "unknown")); }
+    private async Task HandleAddressToSymbol(SessionOperation.AddressToSymbol a2s) { var r = await CliCommandAsync($"info symbol {a2s.Address}"); var sym = r.Split('\n')[0].Trim(); a2s.Completion.TrySetResult(new(sym.Length > 0 ? sym : "??", a2s.Address)); }
+    private async Task HandleFindSymbols(SessionOperation.FindSymbols fs) { var r = await CliCommandAsync($"info functions {fs.Pattern}"); fs.Completion.TrySetResult(ParseSymbolLines(r)); }
+    private async Task HandleDisassemble(SessionOperation.Disassemble d) { d.Completion.TrySetResult(ParseDisassembly(await CliCommandAsync($"disassemble {d.Address},+{d.Count * 4}"))); }
+    private async Task HandleListModules(SessionOperation.ListModules lm) { var r = await CliCommandAsync("info sharedlibrary"); lm.Completion.TrySetResult(ParseSharedLibs(r)); }
 
     private static List<ModuleInfo> ParseSharedLibs(string output)
     {
@@ -432,7 +446,8 @@ public class GdbSession : IDisposable
         _readLoopTask = ReadLoopAsync(_readLoopCts.Token);
 
         // GDB can load core dumps with just -target-select core
-        // The executable is embedded in the core file
+        // The executable is embedded in the core file.
+        // -target-select core does NOT emit *stopped (unlike -exec-run).
         await _client.ExecuteAsync(new GdbMi.MICommand("-target-select", $"core {ld.Path}"));
         ld.Completion.TrySetResult(new("load_dump", _transport.DebuggerPid, null));
     }
@@ -446,8 +461,18 @@ public class GdbSession : IDisposable
         _readLoopCts = new CancellationTokenSource();
         _readLoopTask = ReadLoopAsync(_readLoopCts.Token);
 
-        await _client.ExecuteAsync(new GdbMi.MICommand("-target-attach", $"{a.Pid}"));
-        a.Completion.TrySetResult(new("attach", a.Pid, null));
+        // Set _waitingForFirstStop BEFORE ExecuteAsync because *stopped
+        // may arrive and be processed by ReadLoop before ExecuteAsync's
+        // async continuation resumes on the consumer thread.
+        _firstStopType = "attach";
+        _waitingForFirstStop = a.Completion;
+        var result = await _client.ExecuteAsync(new GdbMi.MICommand("-target-attach", $"{a.Pid}"));
+        if (result.ResultClass == GdbMi.ResultClass.Error)
+        {
+            _waitingForFirstStop = null;
+            a.Completion.TrySetException(new InvalidOperationException(
+                result.TryFindString("msg") ?? "attach failed"));
+        }
     }
 
     private async Task HandleDetach(SessionOperation.Detach d) { await _cmd!.TargetDetach(); CleanupSession(); d.Completion.TrySetResult("detached"); }
@@ -470,12 +495,12 @@ public class GdbSession : IDisposable
             bkptno = results.TryFindString("bkptno");
         }
 
-        // Handle first stop after create
+        // Handle first stop after create/attach/load_dump
         if (_waitingForFirstStop is not null)
         {
             var createCompletion = _waitingForFirstStop;
             _waitingForFirstStop = null;
-            createCompletion.TrySetResult(new("create", _transport?.DebuggerPid, null));
+            createCompletion.TrySetResult(new(_firstStopType, _transport?.DebuggerPid, null));
             return;
         }
 

@@ -21,7 +21,7 @@ public class GdbMiClient : IDisposable
     private readonly GdbCommandFactory _cmd;
     private readonly Channel<StopEvent> _stopChannel = Channel.CreateUnbounded<StopEvent>();
 
-    public DebuggerState State { get; internal set; } = DebuggerState.NotConnected;
+    public DebuggerState State { get; set; } = DebuggerState.NotConnected;
     public bool IsConnected => State != DebuggerState.NotConnected;
     public GdbCommandFactory Cmd => _cmd;
 
