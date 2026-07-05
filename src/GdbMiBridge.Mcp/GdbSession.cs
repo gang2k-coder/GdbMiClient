@@ -118,7 +118,7 @@ public class GdbSession : IDisposable
                 case SessionOperation.ListThreads lt: await HandleListThreads(lt); break;
                 case SessionOperation.GetLocalVariables glv: await HandleGetLocalVariables(glv); break;
                 case SessionOperation.GetProgramCounter gpc: await HandleGetProgramCounter(gpc); break;
-                case SessionOperation.CaptureState cs: cs.Completion.TrySetResult(await CaptureAsync("manual", "manual")); break;
+                case SessionOperation.CaptureState cs: await PauseReadLoop(); try { cs.Completion.TrySetResult(await CaptureAsync("manual", "manual")); } finally { ResumeReadLoop(); } break;
                 case SessionOperation.GetCaptures gc: gc.Completion.TrySetResult(_captures.GetAll()); break;
                 case SessionOperation.ClearCaptures cc: _captures.Clear(); cc.Completion.TrySetResult(true); break;
                 case SessionOperation.ResolveSymbol rs: await HandleResolveSymbol(rs); break;
@@ -375,12 +375,21 @@ public class GdbSession : IDisposable
 
     /// <summary>Run a CLI command and capture console output (~ lines). Uses SendAndReadInline pattern.</summary>
     /// <summary>Run a CLI command and capture console output. Pauses background ReadLoop to avoid read conflicts.</summary>
-    private async Task<string> CliCommandAsync(string cmd)
+    private async Task PauseReadLoop()
     {
-        // Pause the background ReadLoop so we can safely read responses ourselves
         _readLoopCts?.Cancel();
         if (_readLoopTask is not null) { try { await _readLoopTask; } catch { } }
+    }
 
+    private void ResumeReadLoop()
+    {
+        _readLoopCts = new CancellationTokenSource();
+        _readLoopTask = ReadLoopAsync(_readLoopCts.Token);
+    }
+
+    private async Task<string> CliCommandAsync(string cmd)
+    {
+        await PauseReadLoop();
         try
         {
             uint token = Interlocked.Increment(ref _nextToken);
@@ -402,17 +411,56 @@ public class GdbSession : IDisposable
             }
             return output.ToString().Trim();
         }
-        finally
-        {
-            // Restart ReadLoop
-            _readLoopCts = new CancellationTokenSource();
-            _readLoopTask = ReadLoopAsync(_readLoopCts.Token);
-        }
+        finally { ResumeReadLoop(); }
     }
 
     private async Task HandleResolveSymbol(SessionOperation.ResolveSymbol rs) { _ = rs; var r = await CliCommandAsync($"info address {rs.Name}"); rs.Completion.TrySetResult(new(rs.Name, ExtractAddress(r) ?? "unknown")); }
     private async Task HandleAddressToSymbol(SessionOperation.AddressToSymbol a2s) { var r = await CliCommandAsync($"info symbol {a2s.Address}"); var sym = r.Split('\n')[0].Trim(); a2s.Completion.TrySetResult(new(sym.Length > 0 ? sym : "??", a2s.Address)); }
-    private async Task HandleFindSymbols(SessionOperation.FindSymbols fs) { var r = await CliCommandAsync($"info functions {fs.Pattern}"); fs.Completion.TrySetResult(ParseSymbolLines(r)); }
+    private async Task HandleFindSymbols(SessionOperation.FindSymbols fs)
+    {
+        try
+        {
+            // Convert wildcard (*) to regex (.*), otherwise exact match
+            var pattern = fs.Pattern.Contains('*')
+                ? fs.Pattern.Replace("*", ".*")
+                : $"^{fs.Pattern}$";
+            var result = await _client!.ExecuteAsync(
+                new GdbMi.MICommand("-symbol-info-functions", $"--name {pattern}"));
+            if (!result.Contains("symbols")) { fs.Completion.TrySetResult(new()); return; }
+            var symbols = result.Find("symbols");
+            var list = new List<SymbolInfo>();
+            ExtractSymbols(symbols, list);
+            // Filter empty names and only from our binary (non-libc, non-ld)
+            list = list.Where(s => s.Name.Length > 0).ToList();
+            fs.Completion.TrySetResult(list);
+        }
+        catch { fs.Completion.TrySetResult(new()); }
+    }
+
+    private static void ExtractSymbols(GdbMi.ResultValue? container, List<SymbolInfo> list)
+    {
+        switch (container)
+        {
+            case GdbMi.ValueListValue vl:
+                foreach (var item in vl.Content)
+                    ExtractSymbols(item, list);
+                break;
+            case GdbMi.TupleValue t:
+                // Top-level: {debug=[...], nondebug=[...]}
+                if (t.Contains("debug"))
+                    ExtractSymbols(t.Find("debug"), list);
+                if (t.Contains("nondebug"))
+                    ExtractSymbols(t.Find("nondebug"), list);
+                // Per-file: {filename="...", symbols=[...]}
+                if (t.Contains("symbols"))
+                    ExtractSymbols(t.Find("symbols"), list);
+                // Individual symbol: {name="add", line="11", ...}
+                var name = t.TryFindString("name");
+                if (name is not null)
+                    list.Add(new(name, ""));
+                break;
+        }
+    }
     private async Task HandleDisassemble(SessionOperation.Disassemble d) { d.Completion.TrySetResult(ParseDisassembly(await CliCommandAsync($"disassemble {d.Address},+{d.Count * 4}"))); }
     private async Task HandleListModules(SessionOperation.ListModules lm) { var r = await CliCommandAsync("info sharedlibrary"); lm.Completion.TrySetResult(ParseSharedLibs(r)); }
 
@@ -434,17 +482,73 @@ public class GdbSession : IDisposable
     {
         if (rg.Command.StartsWith('-'))
         {
-            // MI command: use ExecuteAsync, result comes in ^done
+            // MI command: use ExecuteAsync, parse structured result
             var results = await _client!.ExecuteAsync(new GdbMi.MICommand(rg.Command, ""));
-            // For -data-evaluate-expression, return just the value. Otherwise dump all fields.
-            string output = results.TryFindString("value")
-                ?? string.Join("; ", results.Content.Select(c => $"{c.Name}={c.Value}"));
-            rg.Completion.TrySetResult(output);
+            // Prefer concise "value" for expressions, else serialize full result
+            var val = results.TryFindString("value");
+            rg.Completion.TrySetResult(val ?? SerializeResult(results));
         }
         else
         {
-            // CLI command: use ConsoleCmdAsync
-            rg.Completion.TrySetResult(await _client!.ConsoleCmdAsync(rg.Command, allowWhileRunning: true));
+            // CLI command: use CliCommandAsync which captures ~ console output
+            rg.Completion.TrySetResult(await CliCommandAsync(rg.Command));
+        }
+    }
+
+    private static string SerializeResult(GdbMi.Results r)
+    {
+        if (r.Content.Length == 0) return r.ResultClass.ToString();
+        var sb = new System.Text.StringBuilder();
+        foreach (var nv in r.Content)
+        {
+            if (sb.Length > 0) sb.AppendLine();
+            SerializeNamed(nv, sb, 0);
+        }
+        return sb.ToString();
+    }
+
+    private static void SerializeNamed(GdbMi.NamedResultValue nv, System.Text.StringBuilder sb, int indent)
+    {
+        sb.Append(new string(' ', indent * 2));
+        if (!string.IsNullOrEmpty(nv.Name)) { sb.Append(nv.Name); sb.Append(" = "); }
+        SerializeValue(nv.Value, sb, indent);
+        sb.AppendLine();
+    }
+
+    private static void SerializeValue(GdbMi.ResultValue v, System.Text.StringBuilder sb, int indent)
+    {
+        switch (v)
+        {
+            case GdbMi.TupleValue t:
+                sb.Append('{');
+                sb.AppendLine();
+                foreach (var item in t.Content)
+                    SerializeNamed(item, sb, indent + 1);
+                sb.Append(new string(' ', indent * 2));
+                sb.Append('}');
+                break;
+            case GdbMi.ResultListValue rl:
+                sb.Append('[');
+                sb.AppendLine();
+                foreach (var item in rl.Content)
+                    SerializeNamed(item, sb, indent + 1);
+                sb.Append(new string(' ', indent * 2));
+                sb.Append(']');
+                break;
+            case GdbMi.ValueListValue vl:
+                sb.Append('[');
+                var fst = true;
+                foreach (var item in vl.Content)
+                {
+                    if (!fst) sb.Append(", ");
+                    fst = false;
+                    SerializeValue(item, sb, indent);
+                }
+                sb.Append(']');
+                break;
+            default:
+                sb.Append(v.ToString());
+                break;
         }
     }
 
@@ -588,8 +692,6 @@ public class GdbSession : IDisposable
     private static List<VariableInfo> ParseVariables(GdbMi.ResultValue locals) { var r = new List<VariableInfo>(); if (locals is GdbMi.ValueListValue v) foreach (GdbMi.TupleValue t in v.AsArray<GdbMi.TupleValue>()) r.Add(new(t.TryFindString("name") ?? "?", t.TryFindString("type") ?? "?", t.TryFindString("value") ?? "?")); return r; }
 
     private static string? ExtractAddress(string o) { var i = o.IndexOf("0x", StringComparison.Ordinal); if (i < 0) return null; var e = o.IndexOf(' ', i); return e < 0 ? o[i..] : o[i..e]; }
-
-    private static List<SymbolInfo> ParseSymbolLines(string o) { var l = new List<SymbolInfo>(); using var sr = new StringReader(o); while (sr.ReadLine() is string ln) { var i = ln.IndexOf("0x", StringComparison.Ordinal); if (i > 0) l.Add(new(ln[..i].Trim(), ln[i..].Trim())); } return l; }
 
     private static List<DisassemblyLine> ParseDisassembly(string o) { var l = new List<DisassemblyLine>(); using var sr = new StringReader(o); while (sr.ReadLine() is string ln) { ln = ln.Trim(); if (string.IsNullOrEmpty(ln) || ln.StartsWith("Dump") || ln.StartsWith("End")) continue; var sp = ln.IndexOf(' '); if (sp < 0) continue; var a = ln[..sp].TrimEnd(':'); var r = ln[(sp + 1)..]; var t = r.IndexOf('\t'); l.Add(new(a, t > 0 ? r[..t].Trim() : "", t > 0 ? r[(t + 1)..].Trim() : r.Trim())); } return l; }
 }
