@@ -189,21 +189,6 @@ public class GdbCommandFactory
     public async Task TargetDetach()
         => await _client.ExecuteAsync(new MICommand("-target-detach", ""));
 
-    public async Task<TargetArchitecture> GetTargetArchitecture()
-    {
-        var result = await _client.ConsoleCmdAsync("show architecture", allowWhileRunning: false);
-        using var reader = new StringReader(result);
-        while (reader.ReadLine() is string line)
-        {
-            if (line.Contains("x86-64", StringComparison.OrdinalIgnoreCase)) return TargetArchitecture.X64;
-            if (line.Contains("i386", StringComparison.OrdinalIgnoreCase)) return TargetArchitecture.X86;
-            if (line.Contains("arm64", StringComparison.OrdinalIgnoreCase) ||
-                line.Contains("aarch64", StringComparison.OrdinalIgnoreCase)) return TargetArchitecture.ARM64;
-            if (line.Contains("arm", StringComparison.OrdinalIgnoreCase)) return TargetArchitecture.ARM;
-        }
-        return TargetArchitecture.Unknown;
-    }
-
     // ═══════════ Internal ═══════════
 
     private static string FmtThreadFrame(string cmd, string args, int threadId, uint frameLevel)

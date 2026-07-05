@@ -441,23 +441,18 @@ public class GdbSession : IDisposable
     private async Task HandleAddressToSymbol(SessionOperation.AddressToSymbol a2s) { var r = await CliCommandAsync($"info symbol {a2s.Address}"); var sym = r.Split('\n')[0].Trim(); a2s.Completion.TrySetResult(new(sym.Length > 0 ? sym : "??", a2s.Address)); }
     private async Task HandleFindSymbols(SessionOperation.FindSymbols fs)
     {
-        try
-        {
-            // Convert wildcard (*) to regex (.*), otherwise exact match
-            var pattern = fs.Pattern.Contains('*')
-                ? fs.Pattern.Replace("*", ".*")
-                : $"^{fs.Pattern}$";
-            var result = await _client!.ExecuteAsync(
-                new GdbMi.MICommand("-symbol-info-functions", $"--name {pattern}"));
-            if (!result.Contains("symbols")) { fs.Completion.TrySetResult(new()); return; }
-            var symbols = result.Find("symbols");
-            var list = new List<SymbolInfo>();
-            ExtractSymbols(symbols, list);
-            // Filter empty names and only from our binary (non-libc, non-ld)
-            list = list.Where(s => s.Name.Length > 0).ToList();
-            fs.Completion.TrySetResult(list);
-        }
-        catch { fs.Completion.TrySetResult(new()); }
+        // Convert wildcard (*) to regex (.*), otherwise exact match
+        var pattern = fs.Pattern.Contains('*')
+            ? fs.Pattern.Replace("*", ".*")
+            : $"^{fs.Pattern}$";
+        var result = await _client!.ExecuteAsync(
+            new GdbMi.MICommand("-symbol-info-functions", $"--name {pattern}"));
+        if (!result.Contains("symbols")) { fs.Completion.TrySetResult(new()); return; }
+        var symbols = result.Find("symbols");
+        var list = new List<SymbolInfo>();
+        ExtractSymbols(symbols, list);
+        list = list.Where(s => s.Name.Length > 0).ToList();
+        fs.Completion.TrySetResult(list);
     }
 
     private static void ExtractSymbols(GdbMi.ResultValue? container, List<SymbolInfo> list)
@@ -584,6 +579,8 @@ public class GdbSession : IDisposable
         _readLoopCts = new CancellationTokenSource();
         _readLoopTask = ReadLoopAsync(_readLoopCts.Token);
 
+        try { Architecture = DetectArchitecture(await CliCommandAsync("show architecture")); } catch { }
+
         // GDB can load core dumps with just -target-select core
         // The executable is embedded in the core file.
         // -target-select core does NOT emit *stopped (unlike -exec-run).
@@ -599,6 +596,8 @@ public class GdbSession : IDisposable
         await _client.ConnectAsync(CancellationToken.None);
         _readLoopCts = new CancellationTokenSource();
         _readLoopTask = ReadLoopAsync(_readLoopCts.Token);
+
+        try { Architecture = DetectArchitecture(await CliCommandAsync("show architecture")); } catch { }
 
         // Set _waitingForFirstStop BEFORE ExecuteAsync because *stopped
         // may arrive and be processed by ReadLoop before ExecuteAsync's
