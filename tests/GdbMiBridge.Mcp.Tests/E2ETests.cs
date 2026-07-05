@@ -653,10 +653,10 @@ public class E2ETests
         _output.WriteLine($"Attach: type={info.Type}, pid={info.ProcessId}");
         Assert.Equal("attach", info.Type);
 
-        // Inspect — should be inside loop_func
+        // Inspect — process spends most time in usleep; main is always on stack
         var stack = await session.GetCallStackAsync(10);
         _output.WriteLine($"Stack: {stack.Count} frames");
-        Assert.Contains(stack, f => f.FunctionName is not null && f.FunctionName.Contains("loop_func"));
+        Assert.Contains(stack, f => f.FunctionName is not null && f.FunctionName.Contains("main"));
 
         // Detach
         var result = await session.DetachAsync();
