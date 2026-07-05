@@ -21,10 +21,10 @@ public class SymbolTools(GdbSession session)
         [Description("Pattern with * wildcards.")] string pattern)
         => await session.FindSymbolsAsync(pattern);
 
-    [McpServerTool, Description("Disassemble instructions at an address.")]
+    [McpServerTool, Description("Disassemble instructions at an address or symbol. Returns approximate count of instructions (variable-length ISAs may differ).")]
     public async Task<List<DisassemblyLine>> Disassemble(
-        [Description("Address or symbol.")] string address,
-        [Description("Number of instructions.")] int count = 10)
+        [Description("Address or symbol, e.g. 'main' or '0x555555555149'.")] string address,
+        [Description("Approximate number of instructions to return.")] int count = 10)
         => await session.DisassembleAsync(address, count);
 
     [McpServerTool, Description("List loaded shared libraries.")]

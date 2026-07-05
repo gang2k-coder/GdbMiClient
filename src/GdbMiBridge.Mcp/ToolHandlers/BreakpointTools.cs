@@ -6,12 +6,12 @@ namespace GdbMiBridge.Mcp;
 [McpServerToolType]
 public class BreakpointTools(GdbSession session)
 {
-    [McpServerTool, Description("Set a breakpoint at a function, file:line, or address.")]
+    [McpServerTool, Description("Set a breakpoint. Location can be: function name ('add'), file:line ('test.c:47'), or address ('*0x555...'). Returns breakpoint config with ID (use to remove/enable/disable).")]
     public async Task<BreakpointConfig> SetBreakpoint(
-        [Description("Function name, file:line, or address.")] string location,
-        [Description("Capture state when hit.")] bool capture = true,
-        [Description("'go' = auto-continue, 'break' = stop and wait.")] string action = "break",
-        [Description("Condition expression.")] string? condition = null)
+        [Description("Function name, file:line, or address (prefix addresses with '*').")] string location,
+        [Description("Auto-capture registers/stack/locals when hit.")] bool capture = true,
+        [Description("'break' = stop and wait, 'go' = auto-continue after capture.")] string action = "break",
+        [Description("GDB condition expression, e.g. 'i > 5'.")] string? condition = null)
         => await session.SetBreakpointAsync(location, capture, action, condition);
 
     [McpServerTool, Description("Remove a breakpoint by ID.")]
@@ -33,9 +33,9 @@ public class BreakpointTools(GdbSession session)
     public List<BreakpointConfig> ListBreakpoints()
         => session.Breakpoints.GetAll();
 
-    [McpServerTool, Description("Set a hardware data breakpoint (watchpoint) at an address.")]
+    [McpServerTool, Description("Set a hardware data breakpoint (watchpoint) that triggers when memory is accessed. Use resolve_symbol first to get the address (e.g. &g_counter → 0x555555558014).")]
     public async Task<BreakpointConfig> SetHardwareBreakpoint(
-        [Description("Hex address, e.g. '0x601040'.")] string address,
+        [Description("Hex address, e.g. '0x601040'. Use resolve_symbol to find a variable's address.")] string address,
         [Description("Access type: 'write', 'read', or 'access'.")] string access = "write",
         [Description("Watch size in bytes: 1, 2, 4, 8.")] int size = 4,
         [Description("Capture state when hit.")] bool capture = true)

@@ -34,7 +34,7 @@ public class StateTools(GdbSession session)
         [Description("Frame index (0 = current).")] int frameIndex = 0)
         => await session.GetLocalVariablesAsync(frameIndex);
 
-    [McpServerTool, Description("Manually capture current program state.")]
+    [McpServerTool, Description("Manually capture current program state (registers, PC, call stack, local variables).")]
     public async Task<CaptureResult> CaptureState()
         => await session.CaptureStateAsync();
 

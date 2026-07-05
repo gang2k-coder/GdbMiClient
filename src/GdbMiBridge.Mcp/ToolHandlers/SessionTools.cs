@@ -32,7 +32,7 @@ public class SessionTools(GdbSession session)
     public async Task<string> Terminate()
         => await session.TerminateAsync();
 
-    [McpServerTool, Description("Query the current debug session status.")]
+    [McpServerTool, Description("Query the current debug session status. Returns 'Stopped', 'Running', or 'Exited'.")]
     public async Task<SessionStatus> Status()
         => await session.StatusAsync();
 }
