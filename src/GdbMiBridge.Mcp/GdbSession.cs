@@ -31,6 +31,7 @@ public class GdbSession : IDisposable
     private int _currentThread = 1;
 
     public GdbMi.DebuggerState State => _client?.State ?? GdbMi.DebuggerState.NotConnected;
+    public GdbMi.TargetArchitecture Architecture { get; private set; } = GdbMi.TargetArchitecture.Unknown;
     public BreakpointManager Breakpoints => _bpManager;
     public CapturesManager Captures => _captures;
 
@@ -172,11 +173,28 @@ public class GdbSession : IDisposable
         catch (OperationCanceledException) { }
     }
 
+    private static string GdbPath =>
+        Environment.GetEnvironmentVariable("GDBMI_GDB_PATH") ?? "gdb";
+
+    private static GdbMi.TargetArchitecture DetectArchitecture(string showArchOutput)
+    {
+        using var reader = new StringReader(showArchOutput);
+        while (reader.ReadLine() is string line)
+        {
+            if (line.Contains("x86-64", StringComparison.OrdinalIgnoreCase)) return GdbMi.TargetArchitecture.X64;
+            if (line.Contains("i386", StringComparison.OrdinalIgnoreCase)) return GdbMi.TargetArchitecture.X86;
+            if (line.Contains("arm64", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("aarch64", StringComparison.OrdinalIgnoreCase)) return GdbMi.TargetArchitecture.ARM64;
+            if (line.Contains("arm", StringComparison.OrdinalIgnoreCase)) return GdbMi.TargetArchitecture.ARM;
+        }
+        return GdbMi.TargetArchitecture.Unknown;
+    }
+
     // ═══════════ Handlers ═══════════
 
     private async Task HandleCreate(SessionOperation.Create c)
     {
-        _transport = new GdbMi.LocalTransport("gdb", "--interpreter=mi3", _logger as Microsoft.Extensions.Logging.ILogger);
+        _transport = new GdbMi.LocalTransport(GdbPath, "--interpreter=mi3", _logger as Microsoft.Extensions.Logging.ILogger);
         _client = new GdbMi.GdbMiClient(_transport, _logger as Microsoft.Extensions.Logging.ILogger<GdbMi.GdbMiClient>);
         _cmd = _client.Cmd;
 
@@ -188,6 +206,11 @@ public class GdbSession : IDisposable
 
         await _cmd.EnableTargetAsyncOption();
         await _cmd.FileExecAndSymbols(c.Executable);
+
+        // Detect target architecture (extension point for future arch-specific behavior)
+        try { Architecture = DetectArchitecture(await CliCommandAsync("show architecture")); }
+        catch { Architecture = GdbMi.TargetArchitecture.Unknown; }
+
         if (c.Arguments is not null)
             await _client.ConsoleCmdAsync($"set args {c.Arguments}", allowWhileRunning: false);
         if (c.StopAtEntry)
@@ -461,7 +484,7 @@ public class GdbSession : IDisposable
                 break;
         }
     }
-    private async Task HandleDisassemble(SessionOperation.Disassemble d) { d.Completion.TrySetResult(ParseDisassembly(await CliCommandAsync($"disassemble {d.Address},+{d.Count * 4}"))); }
+    private async Task HandleDisassemble(SessionOperation.Disassemble d) { d.Completion.TrySetResult(ParseDisassembly(await CliCommandAsync($"disassemble {d.Address},+{d.Count * 8}"))); } // *8: generous upper bound for variable-length ISAs
     private async Task HandleListModules(SessionOperation.ListModules lm) { var r = await CliCommandAsync("info sharedlibrary"); lm.Completion.TrySetResult(ParseSharedLibs(r)); }
 
     private static List<ModuleInfo> ParseSharedLibs(string output)
@@ -554,7 +577,7 @@ public class GdbSession : IDisposable
 
     private async Task HandleLoadDump(SessionOperation.LoadDump ld)
     {
-        _transport = new GdbMi.LocalTransport("gdb", "--interpreter=mi3", _logger as Microsoft.Extensions.Logging.ILogger);
+        _transport = new GdbMi.LocalTransport(GdbPath, "--interpreter=mi3", _logger as Microsoft.Extensions.Logging.ILogger);
         _client = new GdbMi.GdbMiClient(_transport, _logger as Microsoft.Extensions.Logging.ILogger<GdbMi.GdbMiClient>);
         _cmd = _client.Cmd;
         await _client.ConnectAsync(CancellationToken.None);
@@ -570,7 +593,7 @@ public class GdbSession : IDisposable
 
     private async Task HandleAttach(SessionOperation.Attach a)
     {
-        _transport = new GdbMi.LocalTransport("gdb", "--interpreter=mi3", _logger as Microsoft.Extensions.Logging.ILogger);
+        _transport = new GdbMi.LocalTransport(GdbPath, "--interpreter=mi3", _logger as Microsoft.Extensions.Logging.ILogger);
         _client = new GdbMi.GdbMiClient(_transport, _logger as Microsoft.Extensions.Logging.ILogger<GdbMi.GdbMiClient>);
         _cmd = _client.Cmd;
         await _client.ConnectAsync(CancellationToken.None);

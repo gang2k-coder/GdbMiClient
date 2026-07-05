@@ -535,12 +535,14 @@ public class E2ETests
         var pc = await session.GetProgramCounterAsync();
         Assert.Contains("after_loop", pc.Symbol);
 
-        // get_reg: query single register (rip/pc)
+        // get_reg: find PC register by matching value (arch-agnostic — not hardcoded reg#16)
         var regs = await session.GetRegistersAsync();
-        var pcReg = regs.FirstOrDefault(kv => kv.Key == "16" || kv.Key == "rip" || kv.Key == "pc");
-        if (pcReg.Key is not null)
+        var pcReg = regs.FirstOrDefault(kv =>
+            kv.Value.Replace("0x", "").TrimStart('0').Trim() ==
+            pc.Address.Replace("0x", "").TrimStart('0').Trim());
+        if (!string.IsNullOrEmpty(pcReg.Key))
         {
-            _output.WriteLine($"get_reg({pcReg.Key}) = {pcReg.Value}");
+            _output.WriteLine($"get_reg(PC={pcReg.Key}) = {pcReg.Value}");
             Assert.StartsWith("0x", pcReg.Value);
         }
         _output.WriteLine($"regs: {regs.Count} total, first few: {string.Join(", ", regs.Take(5).Select(kv => $"{kv.Key}={kv.Value}"))}");
