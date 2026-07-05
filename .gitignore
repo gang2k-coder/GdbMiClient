@@ -4,3 +4,10 @@ obj/
 *.user
 .vs/
 nupkg/
+coverage/
+# Test native binaries and core dumps
+tests/test-native/test_target_linux
+tests/test-native/sleep_loop
+tests/test-native/crash_test
+tests/test-native/core
+tests/test-native/core.*
