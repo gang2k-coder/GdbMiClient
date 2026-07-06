@@ -11,3 +11,18 @@ tests/test-native/sleep_loop
 tests/test-native/crash_test
 tests/test-native/core
 tests/test-native/core.*
+
+# Internal design/planning docs (keep locally, don't publish)
+docs/superpowers/
+
+# Self-contained publish output
+publish/
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

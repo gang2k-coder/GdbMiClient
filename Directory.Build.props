@@ -1,0 +1,12 @@
+<Project>
+  <PropertyGroup>
+    <Version>1.0.0</Version>
+    <Authors>Gavin Liu</Authors>
+    <Copyright>Copyright (c) 2026 Gavin Liu</Copyright>
+    <RepositoryUrl>https://github.com/gang2k-coder/GdbMiClient</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/gang2k-coder/GdbMiClient</PackageProjectUrl>
+    <PackageTags>gdb;debug;mcp;mi;model-context-protocol</PackageTags>
+  </PropertyGroup>
+</Project>

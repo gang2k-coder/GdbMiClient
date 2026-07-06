@@ -1,0 +1,97 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    name: Build ${{ matrix.rid }}
+    strategy:
+      matrix:
+        include:
+          - rid: linux-x64
+            asset: GdbMiBridge.Mcp
+          - rid: linux-arm64
+            asset: GdbMiBridge.Mcp
+          - rid: win-x64
+            asset: GdbMiBridge.Mcp.exe
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.x'
+
+      - name: Publish self-contained
+        run: |
+          dotnet publish src/GdbMiBridge.Mcp \
+            -c Release \
+            -r ${{ matrix.rid }} \
+            --self-contained true \
+            -p:PublishSingleFile=true \
+            -p:PublishTrimmed=true \
+            -o publish/${{ matrix.rid }}
+
+      - name: Compute SHA256
+        run: |
+          cd publish/${{ matrix.rid }}
+          sha256sum ${{ matrix.asset }} > ${{ matrix.asset }}.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.rid }}
+          path: publish/${{ matrix.rid }}/*
+
+  nuget:
+    name: Publish NuGet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.x'
+
+      - name: Pack
+        run: dotnet pack -c Release -o nupkg
+
+      - name: Push to NuGet.org
+        run: |
+          dotnet nuget push nupkg/*.nupkg \
+            --api-key ${{ secrets.NUGET_API_KEY }} \
+            --source https://api.nuget.org/v3/index.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          path: nupkg/
+
+  release:
+    name: Create GitHub Release
+    needs: [build, nuget]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Organize release assets
+        run: |
+          mkdir -p release-assets
+          cp artifacts/linux-x64/GdbMiBridge.Mcp release-assets/
+          cp artifacts/linux-x64/GdbMiBridge.Mcp.sha256 release-assets/
+          cp artifacts/linux-arm64/GdbMiBridge.Mcp release-assets/
+          cp artifacts/linux-arm64/GdbMiBridge.Mcp.sha256 release-assets/
+          cp artifacts/win-x64/GdbMiBridge.Mcp.exe release-assets/
+          cp artifacts/win-x64/GdbMiBridge.Mcp.exe.sha256 release-assets/
+          cp artifacts/nupkg/*.nupkg release-assets/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          generate_release_notes: true
