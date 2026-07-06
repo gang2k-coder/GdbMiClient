@@ -5,6 +5,9 @@ obj/
 .vs/
 nupkg/
 coverage/
+# Test artifacts (large dumps, logs)
+**/TestResults/
+*.dmp
 # Test native binaries and core dumps
 tests/test-native/test_target_linux
 tests/test-native/sleep_loop
