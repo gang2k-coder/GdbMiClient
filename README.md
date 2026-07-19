@@ -94,17 +94,17 @@ Or download directly from [GitHub Releases](https://github.com/gang2k-coder/GdbM
 | `enable_breakpoint` | Enable a breakpoint |
 | `disable_breakpoint` | Disable a breakpoint without removing it |
 | `list_breakpoints` | List all breakpoints in current session |
-| `set_watchpoint` | Set a hardware data watchpoint |
+| `set_hardware_breakpoint` | Set a hardware data breakpoint (watchpoint) on memory access |
 
 ### Program State
 | Tool | Description |
 |------|-------------|
-| `get_reg` | Get all CPU register values |
-| `get_pc` | Get program counter with symbol info |
+| `get_registers` | Get all CPU register values |
+| `get_program_counter` | Get program counter with symbol info |
 | `read_memory` | Read memory at an address |
-| `get_stack` | Get the call stack |
+| `get_call_stack` | Get the call stack |
 | `list_threads` | List all threads |
-| `get_locals` | Get local variables for a frame |
+| `get_local_variables` | Get local variables for a frame |
 | `capture_state` | Manually capture registers, stack, locals |
 | `get_captures` | Get accumulated capture snapshots |
 | `clear_captures` | Clear accumulated capture snapshots |
