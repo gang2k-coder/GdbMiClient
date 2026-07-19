@@ -5,6 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageId>GdbMiClient</PackageId>
+    <Version>0.8.0</Version>
     <Description>.NET client library for communicating with GDB via the Machine Interface (MI) protocol</Description>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>

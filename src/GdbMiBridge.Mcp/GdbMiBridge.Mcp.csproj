@@ -8,6 +8,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>GdbMiBridge</ToolCommandName>
     <PackageId>GdbMiBridge.Mcp</PackageId>
+    <Version>0.8.0</Version>
     <Description>GDB Machine Interface MCP server — 32 debugging tools for AI agents via Model Context Protocol</Description>
   </PropertyGroup>
 
