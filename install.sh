@@ -119,12 +119,37 @@ esac
 echo ""
 echo "GdbMiBridge installed successfully!"
 echo ""
-echo "MCP configuration example (.mcp.json):"
+echo "========================================"
+echo "  How to configure MCP"
+echo "========================================"
+echo ""
+echo "Claude Code (project-level) — create .mcp.json at your project root:"
+echo ""
 echo '  {'
 echo '    "mcpServers": {'
-echo '      "gdb": {'
+echo '      "gdb-debug": {'
 echo '        "type": "stdio",'
 echo '        "command": "GdbMiBridge"'
 echo '      }'
 echo '    }'
 echo '  }'
+echo ""
+echo "Claude Code (global) — add to ~/.claude.json under \"mcpServers\":"
+echo ""
+echo '  "gdb-debug": {'
+echo '    "type": "stdio",'
+echo '    "command": "GdbMiBridge"'
+echo '  }'
+echo ""
+echo "Cursor — create .cursor/mcp.json at your project root:"
+echo ""
+echo '  {'
+echo '    "mcpServers": {'
+echo '      "gdb-debug": {'
+echo '        "type": "stdio",'
+echo '        "command": "GdbMiBridge"'
+echo '      }'
+echo '    }'
+echo '  }'
+echo ""
+echo "After configuring, restart Claude Code / Cursor and use /mcp to verify."

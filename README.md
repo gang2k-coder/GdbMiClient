@@ -43,7 +43,7 @@ Or download directly from [GitHub Releases](https://github.com/gang2k-coder/GdbM
 ```json
 {
   "mcpServers": {
-    "gdb": {
+    "gdb-debug": {
       "type": "stdio",
       "command": "GdbMiBridge"
     }
@@ -55,7 +55,7 @@ Or download directly from [GitHub Releases](https://github.com/gang2k-coder/GdbM
 ```json
 {
   "servers": {
-    "gdb": {
+    "gdb-debug": {
       "type": "stdio",
       "command": "GdbMiBridge"
     }
