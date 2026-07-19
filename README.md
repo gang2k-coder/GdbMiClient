@@ -27,7 +27,7 @@ Requires [.NET SDK 10.0+](https://dotnet.microsoft.com/download).
 ### Option 2: Self-Contained Binary
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gang2k-coder/GdbMiClient/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/gang2k-coder/GdbMiClient/master/install.sh | bash
 ```
 
 No dependencies — the binary bundles the .NET runtime. Supports `linux-x64` and `linux-arm64`.

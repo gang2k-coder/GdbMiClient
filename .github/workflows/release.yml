@@ -83,12 +83,12 @@ jobs:
       - name: Organize release assets
         run: |
           mkdir -p release-assets
-          cp artifacts/linux-x64/GdbMiBridge.Mcp release-assets/
-          cp artifacts/linux-x64/GdbMiBridge.Mcp.sha256 release-assets/
-          cp artifacts/linux-arm64/GdbMiBridge.Mcp release-assets/
-          cp artifacts/linux-arm64/GdbMiBridge.Mcp.sha256 release-assets/
-          cp artifacts/win-x64/GdbMiBridge.Mcp.exe release-assets/
-          cp artifacts/win-x64/GdbMiBridge.Mcp.exe.sha256 release-assets/
+          cp artifacts/linux-x64/GdbMiBridge.Mcp release-assets/GdbMiBridge.Mcp-linux-x64
+          cp artifacts/linux-x64/GdbMiBridge.Mcp.sha256 release-assets/GdbMiBridge.Mcp-linux-x64.sha256
+          cp artifacts/linux-arm64/GdbMiBridge.Mcp release-assets/GdbMiBridge.Mcp-linux-arm64
+          cp artifacts/linux-arm64/GdbMiBridge.Mcp.sha256 release-assets/GdbMiBridge.Mcp-linux-arm64.sha256
+          cp artifacts/win-x64/GdbMiBridge.Mcp.exe release-assets/GdbMiBridge.Mcp-win-x64.exe
+          cp artifacts/win-x64/GdbMiBridge.Mcp.exe.sha256 release-assets/GdbMiBridge.Mcp-win-x64.exe.sha256
           cp artifacts/nupkg/*.nupkg release-assets/
 
       - name: Create Release

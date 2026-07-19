@@ -23,11 +23,11 @@ case "$OS" in
         exit 1
         ;;
     esac
-    ASSET="GdbMiBridge.Mcp"
+    ASSET="GdbMiBridge.Mcp-${RID}"
     ;;
   MINGW*|MSYS*|CYGWIN*)
     RID="win-x64"
-    ASSET="GdbMiBridge.Mcp.exe"
+    ASSET="GdbMiBridge.Mcp-${RID}.exe"
     ;;
   *)
     echo "Unsupported OS: $OS" >&2
