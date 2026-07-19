@@ -169,3 +169,7 @@ dotnet run --project src/GdbMiBridge.Mcp
 ## License
 
 MIT — see [LICENSE](LICENSE) for details.
+
+## Acknowledgments
+
+The MI protocol engine (`GdbMiClient` library) is adapted from [Microsoft/MIEngine](https://github.com/microsoft/MIEngine), the engine that powers C/C++ debugging in Visual Studio and VS Code. We're grateful to the MIEngine authors for their excellent work.
