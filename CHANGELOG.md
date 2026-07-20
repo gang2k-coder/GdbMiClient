@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.9.0 — 2026-07-20
+
+### GdbMiBridge.Mcp (MCP Server)
+
+- **Capture granularity** — configurable control over what state is captured on breakpoint hits
+  - `CaptureGranularity` record: `RegisterPreset` (None/Basic/Full), `CallStack` (bool), `Variables` (bool)
+  - Session-wide defaults via `set_default_capture_granularity` / `get_default_capture_granularity` MCP tools
+  - Per-breakpoint override on `set_breakpoint`, `set_hardware_breakpoint`, and `capture_state`
+  - Default: variables only (minimal overhead)
+- **Register improvements** — `get_registers` now returns human-readable names (`"rax"` not `"0"`), new `preset` param (`"full"`/`"basic"`), per-architecture basic register sets (X86/X64/ARM/ARM64/Mips)
+- **`get_local_variables`** now includes function arguments (uses `-stack-list-variables` instead of `-stack-list-locals`)
+- **`capture_state`** accepts `registers`/`call_stack`/`variables` params for on-demand granularity
+- 2 new MCP tools: `set_default_capture_granularity`, `get_default_capture_granularity` (34 tools total)
+
+### GdbMiClient (Library)
+
+- `GdbCommandFactory.StackListVariables` — existing method, now used by `HandleGetLocalVariables`
+- `DataListRegisterNames()` — previously unused, now eagerly called at session start for name resolution
+
+### Testing
+
+- 40 unit tests (CaptureGranularity, RegisterSets, ToolHelpers, BreakpointManager, CapturesManager)
+- 22 E2E tests including 7 Theory test cases covering all granularity combinations
+
 ## 0.8.0 — 2026-07-19
 
 First public release.

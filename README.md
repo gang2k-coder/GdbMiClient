@@ -5,7 +5,7 @@
 [![NuGet](https://img.shields.io/nuget/v/GdbMiBridge.Mcp)](https://www.nuget.org/packages/GdbMiBridge.Mcp/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-GDB Machine Interface (MI) client for .NET, with a full-featured MCP server that exposes 32 debugging tools to AI agents.
+GDB Machine Interface (MI) client for .NET, with a full-featured MCP server that exposes 34 debugging tools to AI agents.
 
 ## Packages
 
@@ -65,7 +65,7 @@ Or download directly from [GitHub Releases](https://github.com/gang2k-coder/GdbM
 
 3. The AI agent can now debug C/C++ programs via GDB.
 
-## MCP Tools (32 total)
+## MCP Tools (34 total)
 
 ### Session Management
 | Tool | Description |
@@ -99,15 +99,17 @@ Or download directly from [GitHub Releases](https://github.com/gang2k-coder/GdbM
 ### Program State
 | Tool | Description |
 |------|-------------|
-| `get_registers` | Get all CPU register values |
+| `get_registers` | Get CPU registers with human-readable names (preset: full/basic) |
 | `get_program_counter` | Get program counter with symbol info |
 | `read_memory` | Read memory at an address |
 | `get_call_stack` | Get the call stack |
 | `list_threads` | List all threads |
-| `get_local_variables` | Get local variables for a frame |
-| `capture_state` | Manually capture registers, stack, locals |
+| `get_local_variables` | Get local variables and function arguments for a frame |
+| `capture_state` | Manually capture state with configurable granularity |
 | `get_captures` | Get accumulated capture snapshots |
 | `clear_captures` | Clear accumulated capture snapshots |
+| `set_default_capture_granularity` | Set session-wide capture defaults (registers/stack/vars) |
+| `get_default_capture_granularity` | Query current capture granularity settings |
 
 ### Symbols & Disassembly
 | Tool | Description |

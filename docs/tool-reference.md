@@ -1,6 +1,6 @@
 # GdbMiBridge MCP — Tool Reference
 
-> GdbMiBridge.Mcp v0.8.0 | GDB 8.0+ | .NET 10.0
+> GdbMiBridge.Mcp v0.9.0 | GDB 8.0+ | .NET 10.0
 
 ---
 
@@ -190,18 +190,27 @@ Set a software breakpoint. Location can be a function name, `file:line`, or addr
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `location` | string | **required** | Function name, `file:line`, or `*`-prefixed address |
-| `capture` | bool | true | Auto-capture registers, stack, and locals when hit |
+| `capture` | bool | true | Auto-capture state when hit. When false, nothing is captured. When true, the three granularity params below control **what** is captured |
 | `action` | string | `"break"` | `"break"` = stop and wait; `"go"` = auto-continue after capture |
 | `condition` | string? | null | GDB condition expression, e.g. `"i > 5"`, `"argc == 0"` |
+| `capture_registers` | string | `"none"` | Which registers to capture: `"none"` (fastest, skip registers), `"basic"` (common GPRs only, ~16 on x64), or `"full"` (all registers including SIMD/vector) |
+| `capture_call_stack` | bool | false | Whether to capture the call stack (backtrace) when hit |
+| `capture_variables` | bool | true | Whether to capture local variables and function arguments when hit |
 
-**Returns:** `BreakpointConfig { BpNumber, Location, Capture, Action, Condition, Enabled }`
+**Returns:** `BreakpointConfig { BpNumber, Location, Capture, Action, Condition, Enabled, Granularity }`
 
 ```
-# Function breakpoint, stop on hit
+# Function breakpoint, stop on hit (variables only by default)
 set_breakpoint location="add" capture=true action="break"
 
-# Conditional breakpoint — only fires when i == 7
-set_breakpoint location="loop_body" condition="i == 7" action="break"
+# Full capture — registers, stack, and variables
+set_breakpoint location="main" capture=true capture_registers="full" capture_call_stack=true capture_variables=true
+
+# Lightweight — variables only (default)
+set_breakpoint location="loop_body" action="go"
+
+# Conditional breakpoint — only fires when i == 7, full capture
+set_breakpoint location="loop_body" condition="i == 7" action="break" capture_registers="full" capture_call_stack=true
 
 # File:line breakpoint
 set_breakpoint location="test.c:42" action="break"
@@ -209,8 +218,8 @@ set_breakpoint location="test.c:42" action="break"
 # Address breakpoint
 set_breakpoint location="*0x555555555149" action="break"
 
-# Go-action — auto-continues, accumulates captures
-set_breakpoint location="loop_body" capture=true action="go"
+# Go-action with basic registers only — auto-continues, accumulates minimal captures
+set_breakpoint location="loop_body" capture=true action="go" capture_registers="basic"
 ```
 
 ### `remove_breakpoint`
@@ -266,7 +275,10 @@ Set a hardware data breakpoint (watchpoint) that triggers when memory is read, w
 | `address` | string | **required** | Hex address, e.g. `"0x601040"`. Use `resolve_symbol` to find a variable's address |
 | `access` | string | `"write"` | Access type: `"write"`, `"read"`, or `"access"` |
 | `size` | int | 4 | Watch size in bytes: 1, 2, 4, or 8 |
-| `capture` | bool | true | Auto-capture state when triggered |
+| `capture` | bool | true | Auto-capture state when triggered. Same semantics as `set_breakpoint` — granularity params below control what is captured |
+| `capture_registers` | string | `"none"` | Which registers to capture: `"none"`, `"basic"`, or `"full"` |
+| `capture_call_stack` | bool | false | Whether to capture the call stack on trigger |
+| `capture_variables` | bool | true | Whether to capture local variables and function arguments on trigger |
 
 **Returns:** `BreakpointConfig`
 
@@ -277,8 +289,12 @@ Set a hardware data breakpoint (watchpoint) that triggers when memory is read, w
 resolve_symbol name="g_counter"
 # → { "name": "g_counter", "address": "0x555555558014" }
 
-# Then set a write watchpoint
+# Then set a write watchpoint (variables only by default)
 set_hardware_breakpoint address="0x555555558014" access="write" size=4
+
+# Full capture on watchpoint trigger
+set_hardware_breakpoint address="0x555555558014" access="write" size=4 \
+    capture_registers="full" capture_call_stack=true
 ```
 
 ---
@@ -287,12 +303,20 @@ set_hardware_breakpoint address="0x555555558014" access="write" size=4
 
 ### `get_registers`
 
-Get all CPU register values.
+Get CPU register values with human-readable names (e.g. `"rax"` on x64, `"x0"` on ARM64).
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `preset` | string | `"full"` | `"full"` = all registers including SIMD/vector (~176 on x64); `"basic"` = common GPRs and control registers only (~16 on x64) |
 
 **Returns:** `Dictionary<string, string>` — register name → hex value
 
 ```
+# All registers
 get_registers
+
+# Basic/common registers only (faster, less token usage)
+get_registers preset="basic"
 ```
 
 ### `get_program_counter`
@@ -346,15 +370,16 @@ list_threads
 
 ### `get_local_variables`
 
-Get local variables for a stack frame.
+Get **local variables and function arguments** for a stack frame. Frame 0 is the current/innermost frame.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `frameIndex` | int | 0 | Frame index (0 = current frame) |
+| `frameIndex` | int | 0 | Frame index (0 = current frame). Higher numbers go up the call stack |
 
 **Returns:** `VariableInfo[] { Name, Type, Value }`
 
 ```
+# Current frame
 get_local_variables frameIndex=0
 ```
 
@@ -362,14 +387,55 @@ get_local_variables frameIndex=0
 
 ## 6. Auto-Capture
 
-Auto-capture is the most powerful feature of GdbMiBridge. When a breakpoint or watchpoint is hit with `capture=true`, the session synchronously captures registers, program counter, call stack, memory, and local variables — stored as a snapshot.
+Auto-capture is the most powerful feature of GdbMiBridge. When a breakpoint or watchpoint is hit with `capture=true`, the session captures state — stored as a snapshot. **What** is captured is controlled by capture granularity.
+
+### Capture Granularity
+
+Each breakpoint and the session itself can be configured with three independent toggles:
+
+| Setting | Options | Default | Effect |
+|---------|---------|---------|--------|
+| Registers | `"none"`, `"basic"`, `"full"` | `"none"` | Whether and which registers to capture. `"basic"` = common GPRs (~16 regs), `"full"` = all registers (~176 on x64) |
+| Call Stack | bool | `false` | Whether to capture the backtrace (list of stack frames) |
+| Variables | bool | `true` | Whether to capture local variables and function arguments |
+
+**Resolution order:** per-breakpoint granularity → session default (`set_default_capture_granularity`) → built-in default (variables only).
+
+### `set_default_capture_granularity`
+
+Configure the **session-wide** capture defaults. Applied to all breakpoints that do not specify their own granularity override. Call once at session start to set your debugging strategy.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `registers` | string | `"none"` | `"none"` (fastest), `"basic"` (common GPRs), or `"full"` (all registers including SIMD) |
+| `call_stack` | bool | false | Whether to capture call stack by default |
+| `variables` | bool | true | Whether to capture variables by default |
+
+```
+# Set session to always capture everything
+set_default_capture_granularity registers="full" call_stack=true variables=true
+
+# Set session for lightweight tracing (variables only)
+set_default_capture_granularity registers="none" call_stack=false variables=true
+```
+
+### `get_default_capture_granularity`
+
+Query the current session-wide capture defaults.
+
+**Returns:** `CaptureGranularity { Registers, CallStack, Variables }` — `Registers` is `"none"`, `"basic"`, or `"full"`
+
+```
+get_default_capture_granularity
+```
 
 ### Workflow
 
 ```
+set_default_capture_granularity registers="full" call_stack=true variables=true
 set_breakpoint location="func" capture=true action="go"
     → go() runs the target
-    → breakpoint fires, state captured on the consumer thread
+    → breakpoint fires, state captured per granularity on the consumer thread
     → go-action auto-continues; break-action waits
     → snapshot stored in the captures list
     → user calls get_captures to retrieve all snapshots
@@ -377,12 +443,22 @@ set_breakpoint location="func" capture=true action="go"
 
 ### `capture_state`
 
-Manually capture the current program state (registers, PC, call stack, locals). No breakpoint needed — target must be stopped.
+Manually capture the current program state. Target must be stopped. Uses session defaults unless overridden.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `registers` | string | `"none"` | `"none"`, `"basic"`, or `"full"` |
+| `call_stack` | bool | false | Whether to include the call stack |
+| `variables` | bool | true | Whether to include local variables and function arguments |
 
 **Returns:** `CaptureResult { BreakpointNumber, BreakpointLocation, Registers, ProgramCounter, CallStack, Memory, LocalVariables, Timestamp }`
 
 ```
+# Default granularity (variables only)
 capture_state
+
+# Full capture on demand
+capture_state registers="full" call_stack=true variables=true
 ```
 
 ### `get_captures`
@@ -406,19 +482,23 @@ clear_captures
 ### Typical loop-tracing pattern
 
 ```
-# 1. Clear any stale captures
+# 1. Set session defaults
+set_default_capture_granularity registers="none" call_stack=false variables=true
+
+# 2. Clear any stale captures
 clear_captures
 
-# 2. Set a go-action breakpoint in the loop body
+# 3. Set a go-action breakpoint in the loop body (variables only — fast)
 set_breakpoint location="loop_body" capture=true action="go"
 
-# 3. Set a break-action breakpoint after the loop
-set_breakpoint location="after_loop" capture=true action="break"
+# 4. Set a break-action breakpoint after the loop (full capture for the final stop)
+set_breakpoint location="after_loop" capture=true action="break" \
+    capture_registers="full" capture_call_stack=true
 
-# 4. Run
+# 5. Run
 go timeoutMs=30000
 
-# 5. Retrieve all captures from each loop iteration
+# 6. Retrieve all captures — loop captures are compact, final capture is detailed
 get_captures
 ```
 
@@ -533,27 +613,29 @@ raw_gdb command="x/16x 0x601040"
 | 9 | `step_over` | Execution | — |
 | 10 | `step_out` | Execution | — |
 | 11 | `go_to` | Execution | `location` |
-| 12 | `set_breakpoint` | Breakpoint | `location`, `capture`, `action`, `condition?` |
+| 12 | `set_breakpoint` | Breakpoint | `location`, `capture`, `action`, `condition?`, `capture_registers`, `capture_call_stack`, `capture_variables` |
 | 13 | `remove_breakpoint` | Breakpoint | `id` |
 | 14 | `enable_breakpoint` | Breakpoint | `id` |
 | 15 | `disable_breakpoint` | Breakpoint | `id` |
 | 16 | `list_breakpoints` | Breakpoint | — |
-| 17 | `set_hardware_breakpoint` | Breakpoint | `address`, `access`, `size`, `capture` |
-| 18 | `get_registers` | State | — |
+| 17 | `set_hardware_breakpoint` | Breakpoint | `address`, `access`, `size`, `capture`, `capture_registers`, `capture_call_stack`, `capture_variables` |
+| 18 | `get_registers` | State | `preset` |
 | 19 | `get_program_counter` | State | — |
 | 20 | `read_memory` | State | `address`, `size` |
 | 21 | `get_call_stack` | State | `maxFrames` |
 | 22 | `list_threads` | State | — |
 | 23 | `get_local_variables` | State | `frameIndex` |
-| 24 | `capture_state` | State | — |
+| 24 | `capture_state` | State | `registers`, `call_stack`, `variables` |
 | 25 | `get_captures` | State | — |
 | 26 | `clear_captures` | State | — |
-| 27 | `resolve_symbol` | Symbol | `name` |
-| 28 | `address_to_symbol` | Symbol | `address` |
-| 29 | `find_symbols` | Symbol | `pattern` |
-| 30 | `disassemble` | Symbol | `address`, `count` |
-| 31 | `list_modules` | Symbol | — |
-| 32 | `raw_gdb` | Raw | `command` |
+| 27 | `set_default_capture_granularity` | State | `registers`, `call_stack`, `variables` |
+| 28 | `get_default_capture_granularity` | State | — |
+| 29 | `resolve_symbol` | Symbol | `name` |
+| 30 | `address_to_symbol` | Symbol | `address` |
+| 31 | `find_symbols` | Symbol | `pattern` |
+| 32 | `disassemble` | Symbol | `address`, `count` |
+| 33 | `list_modules` | Symbol | — |
+| 34 | `raw_gdb` | Raw | `command` |
 
 ---
 
@@ -562,9 +644,10 @@ raw_gdb command="x/16x 0x601040"
 ```
 SessionInfo      { Type, ProcessId, ExitCode }
 SessionStatus    { State }
-BreakpointConfig { BpNumber, Location, Capture, Action, Condition, Enabled }
+BreakpointConfig { BpNumber, Location, Capture, Action, Condition, Enabled, Granularity }
 CaptureResult    { BreakpointNumber, BreakpointLocation, Registers,
                    ProgramCounter, CallStack, Memory, LocalVariables, Timestamp }
+CaptureGranularity { Registers ("none"|"basic"|"full"), CallStack, Variables }
 MemoryData       { Address, Size, Hex, Bytes, Ascii }
 ThreadInfo       { ThreadId, IsCurrent }
 VariableInfo     { Name, Type, Value }
