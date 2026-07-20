@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.9.0 — 2026-07-20
+## 0.8.1 — 2026-07-20
 
 ### GdbMiBridge.Mcp (MCP Server)
 

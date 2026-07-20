@@ -1,6 +1,6 @@
 # GdbMiBridge MCP — Tool Reference
 
-> GdbMiBridge.Mcp v0.9.0 | GDB 8.0+ | .NET 10.0
+> GdbMiBridge.Mcp v0.8.1 | GDB 8.0+ | .NET 10.0
 
 ---
 
