@@ -39,8 +39,8 @@ public abstract record SessionOperation
         TaskCompletionSource<string> Completion) : SessionOperation;
 
     // ── Breakpoints ──
-    public record SetBreakpoint(string Location, bool Capture, string Action,
-        string? Condition,
+    public record SetBreakpoint(string Location, bool Capture,
+        CaptureGranularity? Granularity, string Action, string? Condition,
         TaskCompletionSource<BreakpointConfig> Completion) : SessionOperation;
 
     public record RemoveBreakpoint(string Id,
@@ -53,11 +53,11 @@ public abstract record SessionOperation
         TaskCompletionSource<List<BreakpointConfig>> Completion) : SessionOperation;
 
     public record SetHardwareBreakpoint(string Address, string Access, int Size,
-        bool Capture,
+        bool Capture, CaptureGranularity? Granularity,
         TaskCompletionSource<BreakpointConfig> Completion) : SessionOperation;
 
     // ── State ──
-    public record GetRegisters(
+    public record GetRegisters(RegisterPreset Preset,
         TaskCompletionSource<Dictionary<string, string>> Completion) : SessionOperation;
 
     public record ReadMemory(string Address, int Size,
@@ -75,7 +75,7 @@ public abstract record SessionOperation
     public record GetProgramCounter(
         TaskCompletionSource<ProgramCounterInfo> Completion) : SessionOperation;
 
-    public record CaptureState(
+    public record CaptureState(CaptureGranularity? Granularity,
         TaskCompletionSource<CaptureResult> Completion) : SessionOperation;
 
     public record GetCaptures(
@@ -109,7 +109,8 @@ public abstract record SessionOperation
 
 public record BreakpointConfig(
     string BpNumber, string Location, bool Capture, string Action,
-    string? Condition, bool Enabled);
+    string? Condition, bool Enabled,
+    CaptureGranularity? Granularity = null);
 
 public record MemoryData(string Address, int Size, string Hex, byte[] Bytes, string Ascii);
 

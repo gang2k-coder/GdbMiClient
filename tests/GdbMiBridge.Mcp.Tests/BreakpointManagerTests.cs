@@ -57,8 +57,9 @@ public class BreakpointManagerTests
     {
         var m = new BreakpointManager();
         m.Register("1", new BreakpointConfig("1", "main", true, "go", null, true));
-        var (capture, shouldContinue) = m.OnHit("1");
+        var (capture, granularity, shouldContinue) = m.OnHit("1");
         Assert.True(capture);
+        Assert.Null(granularity);
         Assert.True(shouldContinue);
     }
 
@@ -67,8 +68,9 @@ public class BreakpointManagerTests
     {
         var m = new BreakpointManager();
         m.Register("1", new BreakpointConfig("1", "main", false, "break", null, true));
-        var (capture, shouldContinue) = m.OnHit("1");
+        var (capture, granularity, shouldContinue) = m.OnHit("1");
         Assert.False(capture);
+        Assert.Null(granularity);
         Assert.False(shouldContinue);
     }
 
@@ -76,8 +78,24 @@ public class BreakpointManagerTests
     public void OnHit_NotRegistered_ReturnsNoCaptureBreak()
     {
         var m = new BreakpointManager();
-        var (capture, shouldContinue) = m.OnHit("99");
+        var (capture, granularity, shouldContinue) = m.OnHit("99");
         Assert.False(capture);
+        Assert.Null(granularity);
+        Assert.False(shouldContinue);
+    }
+
+    [Fact]
+    public void OnHit_WithGranularity_ReturnsPerBreakpointOverride()
+    {
+        var m = new BreakpointManager();
+        var g = new CaptureGranularity(RegisterPreset.Basic, true, false);
+        m.Register("1", new BreakpointConfig("1", "main", true, "break", null, true, g));
+        var (capture, granularity, shouldContinue) = m.OnHit("1");
+        Assert.True(capture);
+        Assert.NotNull(granularity);
+        Assert.Equal(RegisterPreset.Basic, granularity!.Registers);
+        Assert.True(granularity.CallStack);
+        Assert.False(granularity.Variables);
         Assert.False(shouldContinue);
     }
 
