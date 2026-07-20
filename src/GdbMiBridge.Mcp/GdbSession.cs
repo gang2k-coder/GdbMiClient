@@ -29,11 +29,14 @@ public class GdbSession : IDisposable
     private Task? _readLoopTask;
     private CancellationTokenSource? _readLoopCts;
     private int _currentThread = 1;
+    private string[]? _registerNames;
+    private HashSet<string>? _basicRegisterNames;
 
     public GdbMi.DebuggerState State => _client?.State ?? GdbMi.DebuggerState.NotConnected;
     public GdbMi.TargetArchitecture Architecture { get; private set; } = GdbMi.TargetArchitecture.Unknown;
     public BreakpointManager Breakpoints => _bpManager;
     public CapturesManager Captures => _captures;
+    public CaptureGranularity DefaultGranularity { get; set; } = new();
 
     public GdbSession(ILogger<GdbSession> logger)
     {
@@ -60,17 +63,17 @@ public class GdbSession : IDisposable
     public Task<string> StepOverAsync() => PostAsync<string>(new SessionOperation.StepOver(new()));
     public Task<string> StepOutAsync() => PostAsync<string>(new SessionOperation.StepOut(new()));
     public Task<string> GoToAsync(string location) => PostAsync<string>(new SessionOperation.GoTo(location, new()));
-    public async Task<BreakpointConfig> SetBreakpointAsync(string loc, bool capture, string action, string? cond) { var tcs = new TaskCompletionSource<BreakpointConfig>(); await _channel.Writer.WriteAsync(new SessionOperation.SetBreakpoint(loc, capture, action, cond, tcs)); return await tcs.Task; }
-    public async Task<BreakpointConfig> SetHardwareBreakpointAsync(string address, string access, int size, bool capture) { var tcs = new TaskCompletionSource<BreakpointConfig>(); await _channel.Writer.WriteAsync(new SessionOperation.SetHardwareBreakpoint(address, access, size, capture, tcs)); return await tcs.Task; }
+    public async Task<BreakpointConfig> SetBreakpointAsync(string loc, bool capture, CaptureGranularity? granularity, string action, string? cond) { var tcs = new TaskCompletionSource<BreakpointConfig>(); await _channel.Writer.WriteAsync(new SessionOperation.SetBreakpoint(loc, capture, granularity, action, cond, tcs)); return await tcs.Task; }
+    public async Task<BreakpointConfig> SetHardwareBreakpointAsync(string address, string access, int size, bool capture, CaptureGranularity? granularity) { var tcs = new TaskCompletionSource<BreakpointConfig>(); await _channel.Writer.WriteAsync(new SessionOperation.SetHardwareBreakpoint(address, access, size, capture, granularity, tcs)); return await tcs.Task; }
     public Task<bool> RemoveBreakpointAsync(string id) => PostAsync<bool>(new SessionOperation.RemoveBreakpoint(id, new()));
     public Task<bool> EnableBreakpointAsync(string id, bool enabled) => PostAsync<bool>(new SessionOperation.EnableBreakpoint(id, enabled, new()));
-    public Task<Dictionary<string, string>> GetRegistersAsync() => PostAsync<Dictionary<string, string>>(new SessionOperation.GetRegisters(new()));
+    public Task<Dictionary<string, string>> GetRegistersAsync(RegisterPreset preset = RegisterPreset.Full) => PostAsync<Dictionary<string, string>>(new SessionOperation.GetRegisters(preset, new()));
     public Task<MemoryData> ReadMemoryAsync(string address, int size) => PostAsync<MemoryData>(new SessionOperation.ReadMemory(address, size, new()));
     public Task<List<GdbMi.FrameInfo>> GetCallStackAsync(int maxFrames) => PostAsync<List<GdbMi.FrameInfo>>(new SessionOperation.GetCallStack(maxFrames, new()));
     public Task<List<ThreadInfo>> ListThreadsAsync() => PostAsync<List<ThreadInfo>>(new SessionOperation.ListThreads(new()));
     public Task<List<VariableInfo>> GetLocalVariablesAsync(int frameIndex) => PostAsync<List<VariableInfo>>(new SessionOperation.GetLocalVariables(frameIndex, new()));
     public Task<ProgramCounterInfo> GetProgramCounterAsync() => PostAsync<ProgramCounterInfo>(new SessionOperation.GetProgramCounter(new()));
-    public Task<CaptureResult> CaptureStateAsync() => PostAsync<CaptureResult>(new SessionOperation.CaptureState(new()));
+    public Task<CaptureResult> CaptureStateAsync(CaptureGranularity? granularity = null) => PostAsync<CaptureResult>(new SessionOperation.CaptureState(granularity, new()));
     public Task<SymbolInfo> ResolveSymbolAsync(string name) => PostAsync<SymbolInfo>(new SessionOperation.ResolveSymbol(name, new()));
     public Task<SymbolInfo> AddressToSymbolAsync(string address) => PostAsync<SymbolInfo>(new SessionOperation.AddressToSymbol(address, new()));
     public Task<List<SymbolInfo>> FindSymbolsAsync(string pattern) => PostAsync<List<SymbolInfo>>(new SessionOperation.FindSymbols(pattern, new()));
@@ -119,7 +122,7 @@ public class GdbSession : IDisposable
                 case SessionOperation.ListThreads lt: await HandleListThreads(lt); break;
                 case SessionOperation.GetLocalVariables glv: await HandleGetLocalVariables(glv); break;
                 case SessionOperation.GetProgramCounter gpc: await HandleGetProgramCounter(gpc); break;
-                case SessionOperation.CaptureState cs: await PauseReadLoop(); try { cs.Completion.TrySetResult(await CaptureAsync("manual", "manual")); } finally { ResumeReadLoop(); } break;
+                case SessionOperation.CaptureState cs: await PauseReadLoop(); try { cs.Completion.TrySetResult(await CaptureAsync("manual", "manual", cs.Granularity ?? DefaultGranularity)); } finally { ResumeReadLoop(); } break;
                 case SessionOperation.GetCaptures gc: gc.Completion.TrySetResult(_captures.GetAll()); break;
                 case SessionOperation.ClearCaptures cc: _captures.Clear(); cc.Completion.TrySetResult(true); break;
                 case SessionOperation.ResolveSymbol rs: await HandleResolveSymbol(rs); break;
@@ -211,6 +214,11 @@ public class GdbSession : IDisposable
         try { Architecture = DetectArchitecture(await CliCommandAsync("show architecture")); }
         catch { Architecture = GdbMi.TargetArchitecture.Unknown; }
 
+        // Eagerly load register names for capture-time name resolution
+        try { _registerNames = await _cmd.DataListRegisterNames(); }
+        catch { _registerNames = Array.Empty<string>(); }
+        _basicRegisterNames = RegisterSets.GetBasicSet(Architecture);
+
         if (c.Arguments is not null)
             await _client.ConsoleCmdAsync($"set args {c.Arguments}", allowWhileRunning: false);
         if (c.StopAtEntry)
@@ -267,8 +275,8 @@ public class GdbSession : IDisposable
         }
         var bkpt = result.Find<GdbMi.TupleValue>("bkpt");
         var number = bkpt.FindString("number");
-        _bpManager.Register(number, new(number, sb.Location, sb.Capture, sb.Action, sb.Condition, true));
-        sb.Completion.TrySetResult(new(number, sb.Location, sb.Capture, sb.Action, sb.Condition, true));
+        _bpManager.Register(number, new(number, sb.Location, sb.Capture, sb.Action, sb.Condition, true, sb.Granularity));
+        sb.Completion.TrySetResult(new(number, sb.Location, sb.Capture, sb.Action, sb.Condition, true, sb.Granularity));
     }
 
     private async Task HandleSetHwBreakpoint(SessionOperation.SetHardwareBreakpoint hb)
@@ -277,8 +285,8 @@ public class GdbSession : IDisposable
         var bkpt = result.Find<GdbMi.TupleValue>("wpt");
         var number = bkpt.FindString("number");
         var loc = $"[{hb.Access} @ {hb.Address}, size={hb.Size}]";
-        _bpManager.Register(number, new(number, loc, hb.Capture, "break", null, true));
-        hb.Completion.TrySetResult(new(number, loc, hb.Capture, "break", null, true));
+        _bpManager.Register(number, new(number, loc, hb.Capture, "break", null, true, hb.Granularity));
+        hb.Completion.TrySetResult(new(number, loc, hb.Capture, "break", null, true, hb.Granularity));
     }
 
     private async Task HandleRemoveBp(SessionOperation.RemoveBreakpoint rb)
@@ -291,7 +299,20 @@ public class GdbSession : IDisposable
     {
         var regs = await _cmd!.DataListRegisterValues(_currentThread);
         var dict = new Dictionary<string, string>();
-        foreach (var r in regs) dict[r.TryFindString("number") ?? "?"] = r.TryFindString("value") ?? "?";
+        foreach (var r in regs)
+        {
+            var numStr = r.TryFindString("number") ?? "-1";
+            var name = int.TryParse(numStr, out var num) && num >= 0 && num < (_registerNames?.Length ?? 0)
+                ? _registerNames![num]
+                : numStr;
+            var value = r.TryFindString("value") ?? "?";
+
+            if (gr.Preset == RegisterPreset.Full ||
+                (gr.Preset == RegisterPreset.Basic && _basicRegisterNames?.Contains(name) == true))
+            {
+                dict[name] = value;
+            }
+        }
         gr.Completion.TrySetResult(dict);
     }
 
@@ -392,7 +413,7 @@ public class GdbSession : IDisposable
     }
 
     private async Task HandleGetLocalVariables(SessionOperation.GetLocalVariables glv)
-    { glv.Completion.TrySetResult(ParseVariables(await _cmd!.StackListLocals(1, _currentThread, (uint)glv.FrameIndex))); }
+    { glv.Completion.TrySetResult(ParseVariables(await _cmd!.StackListVariables(1, _currentThread, (uint)glv.FrameIndex))); }
 
     private async Task HandleGetProgramCounter(SessionOperation.GetProgramCounter gpc) { var f = (await _cmd!.StackInfoFrame()).Find<GdbMi.TupleValue>("frame"); gpc.Completion.TrySetResult(new(f.TryFindString("addr") ?? "", f.TryFindString("func") ?? "", "")); }
 
@@ -581,6 +602,11 @@ public class GdbSession : IDisposable
 
         try { Architecture = DetectArchitecture(await CliCommandAsync("show architecture")); } catch { }
 
+        // Eagerly load register names for capture-time name resolution
+        try { _registerNames = await _cmd.DataListRegisterNames(); }
+        catch { _registerNames = Array.Empty<string>(); }
+        _basicRegisterNames = RegisterSets.GetBasicSet(Architecture);
+
         // GDB can load core dumps with just -target-select core
         // The executable is embedded in the core file.
         // -target-select core does NOT emit *stopped (unlike -exec-run).
@@ -598,6 +624,11 @@ public class GdbSession : IDisposable
         _readLoopTask = ReadLoopAsync(_readLoopCts.Token);
 
         try { Architecture = DetectArchitecture(await CliCommandAsync("show architecture")); } catch { }
+
+        // Eagerly load register names for capture-time name resolution
+        try { _registerNames = await _cmd.DataListRegisterNames(); }
+        catch { _registerNames = Array.Empty<string>(); }
+        _basicRegisterNames = RegisterSets.GetBasicSet(Architecture);
 
         // Set _waitingForFirstStop BEFORE ExecuteAsync because *stopped
         // may arrive and be processed by ReadLoop before ExecuteAsync's
@@ -644,9 +675,12 @@ public class GdbSession : IDisposable
 
         if ((reason == "breakpoint-hit" || reason == "watchpoint-trigger") && bkptno is not null)
         {
-            var (shouldCapture, shouldContinue) = _bpManager.OnHit(bkptno);
+            var (shouldCapture, granularity, shouldContinue) = _bpManager.OnHit(bkptno);
             if (shouldCapture)
-                _captures.Add(await CaptureAsync(bkptno, _bpManager.FindByNumber(bkptno)?.Location ?? "unknown"));
+            {
+                var location = _bpManager.FindByNumber(bkptno)?.Location ?? "unknown";
+                _captures.Add(await CaptureAsync(bkptno, location, granularity ?? DefaultGranularity));
+            }
             if (shouldContinue)
             {
                 _goTimeoutCts?.Cancel();
@@ -688,21 +722,53 @@ public class GdbSession : IDisposable
     }
     private uint _nextToken = 10000; // separate token space for capture commands
 
-    private async Task<CaptureResult> CaptureAsync(string bpNumber, string location)
+    private async Task<CaptureResult> CaptureAsync(string bpNumber, string location, CaptureGranularity granularity)
     {
-        Dictionary<string, string> r = new();
-        try { var res = await SendAndReadInline($"-data-list-register-values x"); foreach (GdbMi.TupleValue x in res.Find<GdbMi.ValueListValue>("register-values").AsArray<GdbMi.TupleValue>()) r[x.TryFindString("number") ?? "?"] = x.TryFindString("value") ?? "?"; } catch { }
+        Dictionary<string, string> regs = new();
+        ProgramCounterInfo pc = new("", "", "");
+        List<GdbMi.FrameInfo> stack = new();
+        List<VariableInfo> locals = new();
 
-        ProgramCounterInfo p = new("", "", "");
-        try { var res = await SendAndReadInline("-stack-info-frame"); var f = res.Find<GdbMi.TupleValue>("frame"); p = new(f.TryFindString("addr") ?? "", f.TryFindString("func") ?? "", ""); } catch { }
+        // Always capture PC (lightweight, provides essential context)
+        try { var res = await SendAndReadInline("-stack-info-frame"); var f = res.Find<GdbMi.TupleValue>("frame"); pc = new(f.TryFindString("addr") ?? "", f.TryFindString("func") ?? "", ""); } catch { }
 
-        List<GdbMi.FrameInfo> s = new();
-        try { var res = await SendAndReadInline($"-stack-list-frames 0 20"); var stack = res.Find<GdbMi.ListValue>("stack"); if (stack is GdbMi.ResultListValue rv) s = FramesToList(rv.FindAll<GdbMi.TupleValue>("frame")); } catch { }
+        // Registers with preset filtering
+        if (granularity.Registers != RegisterPreset.None)
+        {
+            try
+            {
+                var res = await SendAndReadInline("-data-list-register-values x");
+                foreach (GdbMi.TupleValue r in res.Find<GdbMi.ValueListValue>("register-values").AsArray<GdbMi.TupleValue>())
+                {
+                    var numStr = r.TryFindString("number") ?? "-1";
+                    var name = int.TryParse(numStr, out var num) && num >= 0 && num < (_registerNames?.Length ?? 0)
+                        ? _registerNames![num]
+                        : numStr;
+                    var value = r.TryFindString("value") ?? "?";
 
-        List<VariableInfo> l = new();
-        try { var res = await SendAndReadInline($"-stack-list-locals --thread 1 --frame 0 1"); l = ParseVariables(res.Find("locals")); } catch { }
+                    if (granularity.Registers == RegisterPreset.Full ||
+                        (granularity.Registers == RegisterPreset.Basic && _basicRegisterNames?.Contains(name) == true))
+                    {
+                        regs[name] = value;
+                    }
+                }
+            }
+            catch { }
+        }
 
-        return new(bpNumber, location, r, p, s, null, l, DateTimeOffset.UtcNow);
+        // Call stack
+        if (granularity.CallStack)
+        {
+            try { var res = await SendAndReadInline("-stack-list-frames 0 20"); var stackVal = res.Find<GdbMi.ListValue>("stack"); if (stackVal is GdbMi.ResultListValue rv) stack = FramesToList(rv.FindAll<GdbMi.TupleValue>("frame")); } catch { }
+        }
+
+        // Variables (args + locals)
+        if (granularity.Variables)
+        {
+            try { var res = await SendAndReadInline("-stack-list-variables --simple-values"); locals = ParseVariables(res.Find("variables")); } catch { }
+        }
+
+        return new(bpNumber, location, regs, pc, stack, null, locals, DateTimeOffset.UtcNow);
     }
 
     // ═══════════ Helpers ═══════════

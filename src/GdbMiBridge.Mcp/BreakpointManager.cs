@@ -30,12 +30,12 @@ public class BreakpointManager
 
     /// <summary>
     /// Called when *stopped with reason="breakpoint-hit".
-    /// Returns (shouldCapture, shouldContinue).
+    /// Returns (shouldCapture, granularity, shouldContinue).
     /// </summary>
-    public (bool ShouldCapture, bool ShouldContinue) OnHit(string bpNumber)
+    public (bool ShouldCapture, CaptureGranularity? Granularity, bool ShouldContinue) OnHit(string bpNumber)
     {
         var config = FindByNumber(bpNumber);
-        if (config is null) return (false, false);
-        return (config.Capture, config.Action == "go");
+        if (config is null) return (false, null, false);
+        return (config.Capture, config.Granularity, config.Action == "go");
     }
 }
