@@ -4,7 +4,7 @@
 
 Please **do not** open a public issue for security vulnerabilities.
 
-Instead, report them privately via [GitHub's private vulnerability reporting](https://github.com/gang2k-coder/GdbMiClient/security/advisories/new) or email the maintainer directly.
+Instead, report them privately via [GitHub's private vulnerability reporting](https://github.com/gang2k-coder/GdbMiBridge/security/advisories/new) or email the maintainer directly.
 
 You can expect a response within 48 hours. After the issue is resolved, we will publish a security advisory and credit you (unless you prefer to remain anonymous).
 

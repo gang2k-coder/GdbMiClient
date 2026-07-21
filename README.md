@@ -1,6 +1,6 @@
 # GdbMiClient
 
-[![CI](https://github.com/gang2k-coder/GdbMiClient/actions/workflows/ci.yml/badge.svg)](https://github.com/gang2k-coder/GdbMiClient/actions/workflows/ci.yml)
+[![CI](https://github.com/gang2k-coder/GdbMiBridge/actions/workflows/ci.yml/badge.svg)](https://github.com/gang2k-coder/GdbMiBridge/actions/workflows/ci.yml)
 [![NuGet](https://img.shields.io/nuget/v/GdbMiClient)](https://www.nuget.org/packages/GdbMiClient/)
 [![NuGet](https://img.shields.io/nuget/v/GdbMiBridge.Mcp)](https://www.nuget.org/packages/GdbMiBridge.Mcp/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -27,12 +27,12 @@ Requires [.NET SDK 10.0+](https://dotnet.microsoft.com/download).
 ### Option 2: Self-Contained Binary
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gang2k-coder/GdbMiClient/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/gang2k-coder/GdbMiBridge/master/install.sh | bash
 ```
 
 No dependencies — the binary bundles the .NET runtime. Supports `linux-x64` and `linux-arm64`.
 
-Or download directly from [GitHub Releases](https://github.com/gang2k-coder/GdbMiClient/releases).
+Or download directly from [GitHub Releases](https://github.com/gang2k-coder/GdbMiBridge/releases).
 
 ## Quick Start
 
@@ -157,7 +157,7 @@ All GDB I/O runs on a single consumer thread via `Channel<SessionOperation>`. Th
 ## Building from Source
 
 ```bash
-git clone https://github.com/gang2k-coder/GdbMiClient.git
+git clone https://github.com/gang2k-coder/GdbMiBridge.git
 cd GdbMiClient
 dotnet build
 dotnet test

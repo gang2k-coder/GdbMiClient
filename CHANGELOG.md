@@ -54,7 +54,7 @@ First public release.
 ### Distribution
 
 - Self-contained binaries for `linux-x64`, `linux-arm64`, `win-x64`
-- One-line install script: `curl -fsSL https://raw.githubusercontent.com/gang2k-coder/GdbMiClient/master/install.sh | bash`
+- One-line install script: `curl -fsSL https://raw.githubusercontent.com/gang2k-coder/GdbMiBridge/master/install.sh | bash`
 - NuGet packages: `GdbMiClient` and `GdbMiBridge.Mcp`
 - .NET Global Tool: `dotnet tool install -g GdbMiBridge.Mcp`
 

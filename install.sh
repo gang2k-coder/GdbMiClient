@@ -2,10 +2,10 @@
 set -e
 
 # GdbMiBridge.Mcp — self-contained binary installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/gang2k-coder/GdbMiClient/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/gang2k-coder/GdbMiBridge/main/install.sh | bash
 #        sh install.sh [version]
 
-REPO="gang2k-coder/GdbMiClient"
+REPO="gang2k-coder/GdbMiBridge"
 VERSION="${1:-latest}"
 
 # ---- platform detection ----
